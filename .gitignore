@@ -1,0 +1,13 @@
+# Build output
+build/
+.gradle/
+local.properties
+
+# Signing material never belongs in version control.
+# build.sh generates a local debug key on first run.
+keystore/
+
+# Editors
+.idea/
+*.iml
+.DS_Store

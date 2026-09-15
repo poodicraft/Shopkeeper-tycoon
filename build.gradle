@@ -1,0 +1,17 @@
+// Optional Android Studio entry point. The project's primary, tested build is
+// ./build.sh, which drives the Android build tools directly and needs no network.
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        // Pinned to 7.x: the manifest keeps its package attribute so that the
+        // aapt-based build.sh can read it, which AGP 8 no longer allows.
+        classpath 'com.android.tools.build:gradle:7.4.2'
+    }
+}
+
+tasks.register('clean', Delete) {
+    delete rootProject.buildDir
+}
