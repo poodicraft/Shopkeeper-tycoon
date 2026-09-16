@@ -5,40 +5,54 @@ import com.poodicraft.shopkeeper.math.MathUtil;
 import com.poodicraft.shopkeeper.math.Vec3;
 
 /**
- * Orbit camera looking at a point on the shop floor.
+ * Third-person follow camera on a spring arm behind the player.
  *
- * <p>Also owns the projection maths the rest of the game needs: screen-to-floor
- * picking for taps, and world-to-screen projection for the 2D overlay labels.
+ * <p>The arm shortens when the room would otherwise come between the camera and the
+ * character, so backing into a corner pushes the view in rather than clipping
+ * through a wall.
  */
 public final class Camera {
-    public final Vec3 target = new Vec3(0f, 0.8f, 0f);
-    public float yaw = (float) (Math.PI * 0.25);
-    public float pitch = (float) Math.toRadians(38);
-    public float distance = 14f;
 
-    public float fovY = 45f;
-    public float near = 0.2f;
-    public float far = 160f;
+    /** Point the camera orbits, normally the player's upper chest. */
+    public final Vec3 target = new Vec3(0f, 1.35f, 0f);
 
-    private static final float MIN_PITCH = (float) Math.toRadians(8);
-    private static final float MAX_PITCH = (float) Math.toRadians(78);
-    public static final float MIN_DISTANCE = 4.5f;
-    public static final float MAX_DISTANCE = 30f;
+    public float yaw = 0f;
+    public float pitch = (float) Math.toRadians(14);
+    public float distance = 3.4f;
+
+    public float fovY = 58f;
+    public float near = 0.08f;
+    public float far = 90f;
+
+    public static final float MIN_DISTANCE = 1.5f;
+    public static final float MAX_DISTANCE = 7.0f;
+    private static final float MIN_PITCH = (float) Math.toRadians(-22);
+    private static final float MAX_PITCH = (float) Math.toRadians(62);
 
     public final Mat4 view = new Mat4();
     public final Mat4 projection = new Mat4();
     public final Mat4 viewProjection = new Mat4();
-    private final Mat4 inverseViewProjection = new Mat4();
-    private boolean inverseValid = false;
 
     public final Vec3 eye = new Vec3();
+    /** Unit vector the camera looks along, on the floor plane; drives movement input. */
+    public final Vec3 flatForward = new Vec3(0f, 0f, 1f);
+    public final Vec3 flatRight = new Vec3(1f, 0f, 0f);
+
     private final Vec3 up = new Vec3(0f, 1f, 0f);
+    private final Vec3 desiredTarget = new Vec3(0f, 1.35f, 0f);
+
+    private float targetYaw = 0f;
+    private float targetPitch = (float) Math.toRadians(14);
+    private float targetDistance = 3.4f;
+    private float currentArm = 3.4f;
 
     private int viewportWidth = 1, viewportHeight = 1;
 
-    /** Smoothed values so flicks and pinches ease out instead of stopping dead. */
-    private float targetYaw = yaw, targetPitch = pitch, targetDistance = distance;
-    private final Vec3 desiredTarget = new Vec3(target);
+    /** Half-extents of the room the camera must stay inside. */
+    public float roomHalfWidth = 20f, roomHalfDepth = 20f, roomHeight = 10f;
+
+    /** Shoulder offset so the character does not sit dead centre. */
+    public float shoulderOffset = 0.30f;
 
     public void setViewport(int width, int height) {
         viewportWidth = Math.max(1, width);
@@ -49,8 +63,10 @@ public final class Camera {
 
     public int viewportHeight() { return viewportHeight; }
 
+    public float aspect() { return (float) viewportWidth / viewportHeight; }
+
     public void orbit(float deltaYaw, float deltaPitch) {
-        targetYaw += deltaYaw;
+        targetYaw = MathUtil.wrapAngle(targetYaw + deltaYaw);
         targetPitch = MathUtil.clamp(targetPitch + deltaPitch, MIN_PITCH, MAX_PITCH);
     }
 
@@ -58,103 +74,137 @@ public final class Camera {
         targetDistance = MathUtil.clamp(targetDistance * factor, MIN_DISTANCE, MAX_DISTANCE);
     }
 
-    /** Slides the look-at point across the floor plane, respecting the current heading. */
-    public void pan(float screenDx, float screenDy, float limitX, float limitZ) {
-        float scale = distance * 0.0022f;
-        float cos = (float) Math.cos(yaw), sin = (float) Math.sin(yaw);
-        // Screen-right maps to the camera's right vector projected on the floor.
-        float rightX = cos, rightZ = -sin;
-        float forwardX = sin, forwardZ = cos;
-        desiredTarget.x -= (rightX * screenDx + forwardX * screenDy) * scale;
-        desiredTarget.z -= (rightZ * screenDx + forwardZ * screenDy) * scale;
-        desiredTarget.x = MathUtil.clamp(desiredTarget.x, -limitX, limitX);
-        desiredTarget.z = MathUtil.clamp(desiredTarget.z, -limitZ, limitZ);
+    public void follow(float x, float y, float z) {
+        desiredTarget.set(x, y, z);
     }
 
-    public void lookAtPoint(float x, float z) {
-        desiredTarget.x = x;
-        desiredTarget.z = z;
-    }
-
-    public void snapToTarget() {
+    public void snap() {
         yaw = targetYaw;
         pitch = targetPitch;
         distance = targetDistance;
+        currentArm = targetDistance;
         target.set(desiredTarget);
+        recompute();
     }
 
     public void update(float dt) {
-        float k = 1f - (float) Math.pow(0.0015, dt);
-        yaw += MathUtil.wrapAngle(targetYaw - yaw) * k;
-        pitch += (targetPitch - pitch) * k;
-        distance += (targetDistance - distance) * k;
-        target.x += (desiredTarget.x - target.x) * k;
-        target.y += (desiredTarget.y - target.y) * k;
-        target.z += (desiredTarget.z - target.z) * k;
+        // Exponential smoothing that is stable at any frame rate.
+        float follow = 1f - (float) Math.pow(0.0009, dt);
+        float look = 1f - (float) Math.pow(0.00002, dt);
+
+        yaw = MathUtil.wrapAngle(yaw + MathUtil.wrapAngle(targetYaw - yaw) * look);
+        pitch += (targetPitch - pitch) * look;
+        distance += (targetDistance - distance) * follow;
+        target.x += (desiredTarget.x - target.x) * follow;
+        target.y += (desiredTarget.y - target.y) * follow;
+        target.z += (desiredTarget.z - target.z) * follow;
+
+        float allowed = armLength(distance);
+        // Snap in immediately when something intrudes; ease back out gently.
+        if (allowed < currentArm) currentArm = allowed;
+        else currentArm += (allowed - currentArm) * (1f - (float) Math.pow(0.05, dt));
+
         recompute();
+    }
+
+    /**
+     * Shortest arm that keeps the camera inside the room.
+     *
+     * <p>Walks the ray from the target out to the desired distance and stops at the
+     * first boundary crossing, which is enough for a single rectangular room and
+     * costs nothing per frame.
+     */
+    private float armLength(float desired) {
+        float cp = (float) Math.cos(pitch);
+        float dirX = -(float) Math.sin(yaw) * cp;
+        float dirY = (float) Math.sin(pitch);
+        float dirZ = -(float) Math.cos(yaw) * cp;
+
+        float limit = desired;
+        final float margin = 0.30f;
+        limit = Math.min(limit, axisLimit(target.x, dirX, roomHalfWidth - margin));
+        limit = Math.min(limit, axisLimit(target.z, dirZ, roomHalfDepth - margin));
+        if (dirY > 1e-4f) limit = Math.min(limit, (roomHeight - margin - target.y) / dirY);
+        if (dirY < -1e-4f) limit = Math.min(limit, (0.45f - target.y) / dirY);
+        return MathUtil.clamp(limit, 0.55f, MAX_DISTANCE);
+    }
+
+    private static float axisLimit(float origin, float direction, float bound) {
+        if (direction > 1e-4f) return (bound - origin) / direction;
+        if (direction < -1e-4f) return (-bound - origin) / direction;
+        return Float.MAX_VALUE;
     }
 
     public void recompute() {
         float cp = (float) Math.cos(pitch);
+        float forwardX = (float) Math.sin(yaw) * cp;
+        float forwardY = -(float) Math.sin(pitch);
+        float forwardZ = (float) Math.cos(yaw) * cp;
+
+        flatForward.set((float) Math.sin(yaw), 0f, (float) Math.cos(yaw)).normalize();
+        // Screen-right is forward x up, which is what the view matrix's first row holds.
+        flatRight.set(-(float) Math.cos(yaw), 0f, (float) Math.sin(yaw));
+
+        float offsetX = flatRight.x * shoulderOffset;
+        float offsetZ = flatRight.z * shoulderOffset;
+
         eye.set(
-                target.x + (float) Math.sin(yaw) * cp * distance,
-                target.y + (float) Math.sin(pitch) * distance,
-                target.z + (float) Math.cos(yaw) * cp * distance);
-        view.setLookAt(eye, target, up);
-        projection.setPerspective(fovY, (float) viewportWidth / viewportHeight, near, far);
+                target.x - forwardX * currentArm + offsetX,
+                target.y - forwardY * currentArm,
+                target.z - forwardZ * currentArm + offsetZ);
+
+        Vec3 lookAt = new Vec3(target.x + offsetX, target.y, target.z + offsetZ);
+        view.setLookAt(eye, lookAt, up);
+        projection.setPerspective(fovY, aspect(), near, far);
         Mat4.multiply(projection, view, viewProjection);
-        inverseValid = false;
+        extractFrustum();
     }
 
-    private boolean ensureInverse() {
-        if (!inverseValid) {
-            inverseValid = viewProjection.invert(inverseViewProjection);
-        }
-        return inverseValid;
-    }
+    /** Six frustum planes as (nx, ny, nz, d), rebuilt each time the camera moves. */
+    private final float[] frustum = new float[24];
 
     /**
-     * Casts a ray from a touch point onto the horizontal plane at {@code planeY}.
+     * Extracts the view frustum from the combined matrix.
      *
-     * @return false when the ray runs parallel to (or away from) the plane.
+     * <p>Roughly half the shop is behind the player at any moment, so testing each
+     * fitting before submitting it removes a large slice of the draw and shadow work
+     * for a few dozen multiplies.
      */
-    public boolean screenToFloor(float screenX, float screenY, float planeY, Vec3 out) {
-        if (!ensureInverse()) return false;
-        float ndcX = (2f * screenX / viewportWidth) - 1f;
-        float ndcY = 1f - (2f * screenY / viewportHeight);
+    private void extractFrustum() {
+        float[] m = viewProjection.m;
+        // Rows of the combined matrix, combined into the six clip planes.
+        setPlane(0, m[3] + m[0], m[7] + m[4], m[11] + m[8], m[15] + m[12]);   // left
+        setPlane(1, m[3] - m[0], m[7] - m[4], m[11] - m[8], m[15] - m[12]);   // right
+        setPlane(2, m[3] + m[1], m[7] + m[5], m[11] + m[9], m[15] + m[13]);   // bottom
+        setPlane(3, m[3] - m[1], m[7] - m[5], m[11] - m[9], m[15] - m[13]);   // top
+        setPlane(4, m[3] + m[2], m[7] + m[6], m[11] + m[10], m[15] + m[14]);  // near
+        setPlane(5, m[3] - m[2], m[7] - m[6], m[11] - m[10], m[15] - m[14]);  // far
+    }
 
-        unproject(ndcX, ndcY, -1f, rayNear);
-        unproject(ndcX, ndcY, 1f, rayFar);
-        float dy = rayFar.y - rayNear.y;
-        if (Math.abs(dy) < 1e-5f) return false;
-        float t = (planeY - rayNear.y) / dy;
-        if (t < 0f) return false;
-        out.set(
-                rayNear.x + (rayFar.x - rayNear.x) * t,
-                planeY,
-                rayNear.z + (rayFar.z - rayNear.z) * t);
+    private void setPlane(int index, float a, float b, float c, float d) {
+        float length = (float) Math.sqrt(a * a + b * b + c * c);
+        if (length < 1e-8f) length = 1f;
+        int i = index * 4;
+        frustum[i] = a / length;
+        frustum[i + 1] = b / length;
+        frustum[i + 2] = c / length;
+        frustum[i + 3] = d / length;
+    }
+
+    /** True when a bounding sphere is at least partly inside the view. */
+    public boolean sphereVisible(float x, float y, float z, float radius) {
+        for (int i = 0; i < 6; i++) {
+            int p = i * 4;
+            float distance = frustum[p] * x + frustum[p + 1] * y + frustum[p + 2] * z + frustum[p + 3];
+            if (distance < -radius) return false;
+        }
         return true;
     }
 
-    private final Vec3 rayNear = new Vec3();
-    private final Vec3 rayFar = new Vec3();
-
-    private void unproject(float ndcX, float ndcY, float ndcZ, Vec3 out) {
-        float[] m = inverseViewProjection.m;
-        float x = m[0] * ndcX + m[4] * ndcY + m[8] * ndcZ + m[12];
-        float y = m[1] * ndcX + m[5] * ndcY + m[9] * ndcZ + m[13];
-        float z = m[2] * ndcX + m[6] * ndcY + m[10] * ndcZ + m[14];
-        float w = m[3] * ndcX + m[7] * ndcY + m[11] * ndcZ + m[15];
-        if (Math.abs(w) < 1e-9f) w = 1e-9f;
-        out.set(x / w, y / w, z / w);
-    }
-
     /**
-     * Projects a world point to overlay pixel coordinates.
+     * Projects a world point to pixels for the 2D overlay.
      *
-     * @param out receives x and y in pixels; z carries the NDC depth so callers can
-     *            discard points behind the camera.
-     * @return false when the point sits behind the near plane.
+     * @return false when the point is behind the camera
      */
     public boolean worldToScreen(float wx, float wy, float wz, Vec3 out) {
         float[] m = viewProjection.m;
@@ -164,8 +214,7 @@ public final class Camera {
         float w = m[3] * wx + m[7] * wy + m[11] * wz + m[15];
         if (w <= 1e-5f) return false;
         float invW = 1f / w;
-        out.set(
-                (x * invW * 0.5f + 0.5f) * viewportWidth,
+        out.set((x * invW * 0.5f + 0.5f) * viewportWidth,
                 (0.5f - y * invW * 0.5f) * viewportHeight,
                 z * invW);
         return true;

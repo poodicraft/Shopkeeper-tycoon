@@ -7,8 +7,6 @@ package com.poodicraft.shopkeeper.math;
 public final class Mat4 {
     public final float[] m = new float[16];
 
-    private static final float[] TMP_A = new float[16];
-
     public Mat4() { identity(); }
 
     public Mat4 identity() {
@@ -91,19 +89,59 @@ public final class Mat4 {
     /** this = this * o */
     public Mat4 multiply(Mat4 o) { return multiply(this, o, this); }
 
-    /** out = a * b. {@code out} may alias {@code a} or {@code b}. */
+    /**
+     * out = a * b. {@code out} may alias {@code a} or {@code b}.
+     *
+     * <p>The scratch buffer is a local rather than a shared static, so meshes can be
+     * built on a worker thread while the GL thread renders.
+     */
     public static Mat4 multiply(Mat4 a, Mat4 b, Mat4 out) {
         float[] am = a.m, bm = b.m;
+        float[] t = new float[16];
         for (int c = 0; c < 4; c++) {
             int c4 = c * 4;
             float b0 = bm[c4], b1 = bm[c4 + 1], b2 = bm[c4 + 2], b3 = bm[c4 + 3];
-            TMP_A[c4]     = am[0] * b0 + am[4] * b1 + am[8]  * b2 + am[12] * b3;
-            TMP_A[c4 + 1] = am[1] * b0 + am[5] * b1 + am[9]  * b2 + am[13] * b3;
-            TMP_A[c4 + 2] = am[2] * b0 + am[6] * b1 + am[10] * b2 + am[14] * b3;
-            TMP_A[c4 + 3] = am[3] * b0 + am[7] * b1 + am[11] * b2 + am[15] * b3;
+            t[c4]     = am[0] * b0 + am[4] * b1 + am[8]  * b2 + am[12] * b3;
+            t[c4 + 1] = am[1] * b0 + am[5] * b1 + am[9]  * b2 + am[13] * b3;
+            t[c4 + 2] = am[2] * b0 + am[6] * b1 + am[10] * b2 + am[14] * b3;
+            t[c4 + 3] = am[3] * b0 + am[7] * b1 + am[11] * b2 + am[15] * b3;
         }
-        System.arraycopy(TMP_A, 0, out.m, 0, 16);
+        System.arraycopy(t, 0, out.m, 0, 16);
         return out;
+    }
+
+    /** Orthographic projection, used for the directional shadow map. */
+    public Mat4 setOrtho(float l, float r, float b, float t, float near, float far) {
+        identity();
+        m[0] = 2f / (r - l);
+        m[5] = 2f / (t - b);
+        m[10] = -2f / (far - near);
+        m[12] = -(r + l) / (r - l);
+        m[13] = -(t + b) / (t - b);
+        m[14] = -(far + near) / (far - near);
+        return this;
+    }
+
+    /** Builds translate * rotate * uniform-scale, the standard bone transform. */
+    public Mat4 setTRS(float tx, float ty, float tz, Quat rotation, float scale) {
+        rotation.toMatrix(m);
+        if (scale != 1f) {
+            for (int c = 0; c < 3; c++) {
+                m[c * 4] *= scale;
+                m[c * 4 + 1] *= scale;
+                m[c * 4 + 2] *= scale;
+            }
+        }
+        m[12] = tx; m[13] = ty; m[14] = tz;
+        return this;
+    }
+
+    /** Applies this matrix to a direction vector, ignoring translation. */
+    public Vec3 transformDirection(Vec3 d, Vec3 out) {
+        float x = m[0] * d.x + m[4] * d.y + m[8] * d.z;
+        float y = m[1] * d.x + m[5] * d.y + m[9] * d.z;
+        float z = m[2] * d.x + m[6] * d.y + m[10] * d.z;
+        return out.set(x, y, z);
     }
 
     /** Applies this matrix to a point (w = 1) and writes the result into {@code out}. */

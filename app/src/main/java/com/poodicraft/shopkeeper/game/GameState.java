@@ -73,9 +73,14 @@ public final class GameState {
 
     public int shelfCapacity() { return 12 + 6 * upgradeLevel(Upgrade.SHELVING); }
 
-    /** Seconds one customer takes at the till. */
-    public float checkoutDuration() {
-        return 3.0f * (float) Math.pow(0.79, upgradeLevel(Upgrade.REGISTER));
+    /**
+     * Seconds to scan one item at the till.
+     *
+     * <p>A basket is scanned item by item, so this sets how long a customer holds
+     * the queue and how long the player is pinned behind the counter.
+     */
+    public float scanTime() {
+        return 0.52f * (float) Math.pow(0.82, upgradeLevel(Upgrade.REGISTER));
     }
 
     public float marketingMultiplier() { return 1f + 0.34f * upgradeLevel(Upgrade.MARKETING); }
@@ -159,4 +164,13 @@ public final class GameState {
     public void adjustSatisfaction(float delta) {
         satisfaction = MathUtil.clamp(satisfaction + delta, 0.05f, 1f);
     }
+
+    public int totalStock() {
+        int total = 0;
+        for (int i = 0; i < stock.length; i++) total += stock[i];
+        return total;
+    }
+
+    /** Units of a product waiting in the stockroom. */
+    public int stockOf(ProductType product) { return stock[product.ordinal()]; }
 }

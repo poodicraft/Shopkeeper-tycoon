@@ -43,6 +43,8 @@ public final class SaveManager {
         put(sb, "sound", s.soundEnabled ? 1 : 0);
         put(sb, "autoStock", s.autoRestockEnabled ? 1 : 0);
         put(sb, "time", s.lastPlayedMillis);
+        put(sb, "carry", shop.player.carrying == null ? "-" : shop.player.carrying.name());
+        put(sb, "carryN", shop.player.carryCount);
 
         for (int i = 0; i < s.stock.length; i++) put(sb, "st" + i, s.stock[i]);
         for (int i = 0; i < s.upgradeLevels.length; i++) put(sb, "up" + i, s.upgradeLevels[i]);
@@ -109,13 +111,21 @@ public final class SaveManager {
             String productName = map.getString("sh" + i + "p", "-");
             ProductType product = "-".equals(productName) ? null : ProductType.byName(productName);
             shelf.product = product;
-            shelf.stock = map.getInt("sh" + i + "n", 0);
+            shelf.stock = MathUtil.clamp(map.getInt("sh" + i + "n", 0), 0, shelf.capacity(s));
             shelf.price = map.getFloat("sh" + i + "c", product == null ? 0f : product.basePrice);
             if (product == null) shelf.stock = 0;
-            shelf.stock = MathUtil.clamp(shelf.stock, 0, shelf.capacity(s));
+            shelf.goodsDirty = true;
         }
 
-        shop.rebuildNavigation();
+        String carried = map.getString("carry", "-");
+        ProductType carriedProduct = "-".equals(carried) ? null : ProductType.byName(carried);
+        if (carriedProduct != null) {
+            shop.player.carrying = carriedProduct;
+            shop.player.carryCount = Math.max(0, map.getInt("carryN", 0));
+            if (shop.player.carryCount == 0) shop.player.carrying = null;
+        }
+
+        shop.rebuildObstacles();
         shop.syncStaff();
         return grantOfflineEarnings(shop);
     }
@@ -153,6 +163,7 @@ public final class SaveManager {
             if (!shelf.owned || shelf.product == null) continue;
             int sold = (int) Math.floor(shelf.stock * fraction);
             shelf.stock = Math.max(0, shelf.stock - sold);
+            shelf.goodsDirty = true;
         }
         s.money += earned;
         s.totalRevenue += earned;

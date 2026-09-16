@@ -2,12 +2,12 @@ package com.poodicraft.shopkeeper.game;
 
 /** Everything the player can spend money on, other than stock and shelves. */
 public enum Upgrade {
-    REGISTER  ("Register",  "Faster checkout, shorter queues",      5,  250f, 2.15f),
+    REGISTER  ("Scanner",   "Scans each item faster at the till",   5,  250f, 2.15f),
     MARKETING ("Marketing", "Brings more customers through the door",6, 180f, 2.30f),
     DECOR     ("Decor",     "Happier shoppers accept higher prices", 5,  320f, 2.25f),
     SHELVING  ("Shelving",  "More units fit on every shelf",         5,  400f, 2.40f),
     CASHIER   ("Cashier",   "Serves the queue while you are away",   2,  700f, 3.60f),
-    STOCKER   ("Stocker",   "Refills shelves from the stockroom",    2,  550f, 3.60f);
+    STOCKER   ("Stocker",   "Carries stock out and fills shelves",   2,  550f, 3.60f);
 
     public final String displayName;
     public final String description;

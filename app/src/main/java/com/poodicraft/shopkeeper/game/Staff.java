@@ -1,9 +1,17 @@
 package com.poodicraft.shopkeeper.game;
 
+import com.poodicraft.shopkeeper.math.MathUtil;
+
 import java.util.Random;
 
-/** Hired help: cashiers hold the till, stockers ferry goods from the stockroom. */
-public final class Staff extends Agent {
+/**
+ * Hired help.
+ *
+ * <p>A cashier holds the till so the queue moves while the player is out on the
+ * floor; a stocker ferries crates from the stockroom to whichever shelf is emptiest.
+ * Both do exactly what the player would otherwise be doing by hand.
+ */
+public final class Staff extends Actor {
 
     public enum Role { CASHIER, STOCKER }
 
@@ -16,21 +24,20 @@ public final class Staff extends Agent {
     public int targetShelf = -1;
     public ProductType carrying = null;
     public int carryCount = 0;
-    /** Drives the crate-in-hands pose while a stocker is loaded up. */
-    public float carryBlend = 0f;
 
-    /** Where a cashier stands, or where a stocker returns to when idle. */
+    public float walkSpeed;
     public float homeX, homeZ, homeHeading;
 
     public Staff(Role role, Random rng) {
         this.role = role;
-        randomizeLook(rng);
-        // Staff wear a consistent uniform so they read as employees at a glance.
-        shirtColor = role == Role.CASHIER ? 0x2E7D63 : 0x2F5D8A;
-        trouserColor = 0x2B303B;
-        accessory = role == Role.CASHIER ? 1 : 2;
-        speed = role == Role.STOCKER ? 1.7f : 1.4f;
-        heightScale = 0.98f + rng.nextFloat() * 0.08f;
+        appearance = Appearance.staffMember(rng);
+        if (role == Role.STOCKER) {
+            appearance.shirt = 0x3D6EA5;
+            appearance.markDirty();
+        }
+        radius = 0.28f;
+        walkSpeed = role == Role.STOCKER ? 1.75f : 1.35f;
+        animator.personalPhase = rng.nextFloat() * 6.28f;
     }
 
     public void setHome(float x, float z, float heading) {
@@ -40,4 +47,13 @@ public final class Staff extends Agent {
     }
 
     public boolean isCarrying() { return carrying != null && carryCount > 0; }
+
+    public void updateAnimation(float dt, boolean walking, boolean serving, boolean stocking) {
+        animator.locomotion = MathUtil.approach(animator.locomotion, walking ? 1f : 0f, dt * 6f);
+        animator.carry = MathUtil.approach(animator.carry, isCarrying() ? 1f : 0f, dt * 4f);
+        animator.scan = MathUtil.approach(animator.scan, serving ? 1f : 0f, dt * 5f);
+        animator.reach = MathUtil.approach(animator.reach, stocking ? 1f : 0f, dt * 5f);
+        animator.crouch = MathUtil.approach(animator.crouch,
+                stocking && animator.reachHeight < 0.75f ? 0.85f : 0f, dt * 4f);
+    }
 }

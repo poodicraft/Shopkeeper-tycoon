@@ -1,150 +1,139 @@
 package com.poodicraft.shopkeeper.game;
 
 import com.poodicraft.shopkeeper.math.MathUtil;
+import com.poodicraft.shopkeeper.world.ShopLayout;
+import com.poodicraft.shopkeeper.world.WorldBuilder;
 
 import java.util.ArrayList;
 import java.util.Random;
 
 /**
- * The simulated shop: floor layout, navigation, shoppers, staff and the money that
- * moves between them. Rendering reads from here; the UI drives it through the
- * player-action methods near the bottom.
+ * The shop as a place you work in.
+ *
+ * <p>Stock does not teleport onto shelves: it is ordered at the back-office
+ * terminal, arrives in the stockroom, and has to be carried out and put away by
+ * hand - by the player, or by a stocker once one is hired. Customers queue at the
+ * till and stay queued until somebody scans their basket.
  */
 public final class Shop {
 
-    // ------------------------------------------------------------------- layout
-
-    public static final float HALF_WIDTH = 6f;
-    public static final float HALF_DEPTH = 8f;
-    public static final float WALL_HEIGHT = 3.2f;
-
-    /** Door opening in the front wall (z = +HALF_DEPTH). */
-    public static final float DOOR_MIN_X = 3.3f;
-    public static final float DOOR_MAX_X = 5.7f;
-    public static final float DOOR_CENTER_X = (DOOR_MIN_X + DOOR_MAX_X) * 0.5f;
-
-    /** Checkout counter footprint. */
-    public static final float COUNTER_MIN_X = -5.6f;
-    public static final float COUNTER_MAX_X = -1.6f;
-    public static final float COUNTER_MIN_Z = 5.8f;
-    public static final float COUNTER_MAX_Z = 6.8f;
-    public static final float COUNTER_HEIGHT = 1.05f;
-
-    /** Where the till sits, and where the cashier stands behind it. */
-    public static final float REGISTER_X = -2.2f;
-    public static final float REGISTER_Z = 6.3f;
-    public static final float CASHIER_X = -2.4f;
-    public static final float CASHIER_Z = 5.15f;
-
-    /** Head of the queue; further slots run toward the door. */
-    public static final float QUEUE_HEAD_X = -1.9f;
-    public static final float QUEUE_Z = 7.35f;
-    public static final float QUEUE_SPACING = 0.78f;
-    public static final int MAX_QUEUE = 8;
-
-    /** Stockroom hatch in the back wall that stockers collect goods from. */
-    public static final float STOCKROOM_X = -5.0f;
-    public static final float STOCKROOM_Z = -7.1f;
-
-    public static final int SHELF_SLOTS = 15;
-    private static final float SHELF_WIDTH = 2.6f;
-    private static final float SHELF_DEPTH = 0.9f;
-    private static final float[] SHELF_ROW_Z = {-6.5f, -4.0f, -1.5f, 1.0f, 3.5f};
-    private static final float[] SHELF_COL_X = {-3.6f, 0f, 3.6f};
-
-    public static float shelfWidth() { return SHELF_WIDTH; }
-
-    public static float shelfDepth() { return SHELF_DEPTH; }
-
-    // --------------------------------------------------------------------- data
-
     public final GameState state;
+    public final Player player = new Player();
     public final NavGrid nav;
+    public final Collision collision = new Collision();
+
     public final ArrayList<Shelf> shelves = new ArrayList<Shelf>();
     public final ArrayList<Customer> customers = new ArrayList<Customer>();
     public final ArrayList<Staff> staff = new ArrayList<Staff>();
     public final ArrayList<Popup> popups = new ArrayList<Popup>();
 
+    public final Interaction interaction = new Interaction();
+
+    /** Path clearance, comfortably wider than the widest character radius. */
+    private static final float NAV_CLEARANCE = 0.36f;
+
     private final Random rng = new Random();
     private final ArrayList<float[]> pathScratch = new ArrayList<float[]>();
-    private final float[] pointScratch = new float[2];
+    private final boolean[] availability = new boolean[ProductType.ALL.length];
 
-    /** Customers currently in the checkout line, head first. */
     private final ArrayList<Customer> queue = new ArrayList<Customer>();
-    private Customer atRegister = null;
+    private Customer servingCustomer = null;
+    /** True when a hired cashier, rather than the player, is working the till. */
+    private boolean servedByStaff = false;
 
     private float spawnAccumulator = 0f;
     private float staffThinkTimer = 0f;
+    private float scanTimer = 0f;
 
-    /** Set on the frame a day rolls over so the UI can show the summary. */
     public DaySummary pendingSummary = null;
-    /** Levels gained this frame, for the UI to celebrate. */
     public int pendingLevelUps = 0;
 
     public interface Listener {
         void onSale(float amount, int itemCount);
+        void onScanBeep();
         void onCustomerLost(String reason);
         void onLevelUp(int newLevel);
+        void onStockPlaced(int units);
     }
 
     public Listener listener = null;
 
     public Shop(GameState state) {
         this.state = state;
-        nav = new NavGrid(-HALF_WIDTH - 0.6f, -HALF_DEPTH - 0.6f,
-                HALF_WIDTH * 2 + 1.2f, HALF_DEPTH * 2 + 2.6f, 0.4f);
-        buildShelves();
-        rebuildNavigation();
-        syncStaff();
-    }
+        nav = new NavGrid(-ShopLayout.HALF_WIDTH - 0.5f, -ShopLayout.HALF_DEPTH - 0.5f,
+                ShopLayout.HALF_WIDTH * 2 + 1f, ShopLayout.HALF_DEPTH * 2 + 3.5f, 0.35f);
 
-    private void buildShelves() {
-        int index = 0;
-        for (int row = 0; row < SHELF_ROW_Z.length; row++) {
-            for (int col = 0; col < SHELF_COL_X.length; col++) {
-                float x = SHELF_COL_X[col];
-                float z = SHELF_ROW_Z[row];
-                int cost = (int) (140 * Math.pow(1.52, index));
-                Shelf shelf = new Shelf(index, x, z, 0f, x, z + 1.05f, cost);
-                shelves.add(shelf);
-                index++;
-            }
-        }
-        // Two units come with the lease so there is something to sell on day one.
+        for (int i = 0; i < ShopLayout.SHELF_SLOTS; i++) shelves.add(new Shelf(i));
+        // The lease comes with two units already fitted, so there is something to sell.
         shelves.get(0).owned = true;
         shelves.get(0).assign(ProductType.BREAD);
         shelves.get(1).owned = true;
         shelves.get(1).assign(ProductType.MILK);
+
+        player.teleport(ShopLayout.SERVE_X + 1.2f, ShopLayout.SERVE_Z - 0.8f);
+        player.heading = (float) Math.PI;
+
+        rebuildObstacles();
+        syncStaff();
     }
 
-    /** Rebuilds walkability. Call after shelves are bought or the layout changes. */
-    public void rebuildNavigation() {
+    // ------------------------------------------------------------- navigation
+
+    /** Rebuilds collision and pathfinding. Call after a shelf is bought. */
+    public void rebuildObstacles() {
+        collision.clear();
+        for (int i = 0; i < shelves.size(); i++) {
+            Shelf shelf = shelves.get(i);
+            if (!shelf.owned) continue;
+            collision.addCentred(shelf.x, shelf.z,
+                    ShopLayout.SHELF_WIDTH, ShopLayout.SHELF_DEPTH);
+        }
+        collision.addBox(ShopLayout.COUNTER_MIN_X, ShopLayout.COUNTER_MIN_Z,
+                ShopLayout.COUNTER_MAX_X, ShopLayout.COUNTER_MAX_Z);
+        collision.addCentred(ShopLayout.CHILLER_X, ShopLayout.CHILLER_Z,
+                ShopLayout.CHILLER_WIDTH, ShopLayout.CHILLER_LENGTH);
+        collision.addCentred(ShopLayout.TERMINAL_X, ShopLayout.TERMINAL_Z + 0.10f, 1.70f, 0.70f);
+        // Pallet of crates beside the stockroom door.
+        collision.addCentred(ShopLayout.STOCKROOM_X + 1.55f, ShopLayout.STOCKROOM_Z + 0.75f,
+                1.40f, 1.30f);
+        // Window display plinths along the front wall.
+        collision.addCentred(-4.30f, ShopLayout.HALF_DEPTH - 0.34f, 2.90f, 0.45f);
+        collision.addCentred(0.95f, ShopLayout.HALF_DEPTH - 0.34f, 2.40f, 0.45f);
+
         nav.clearObstacles();
         for (int r = 0; r < nav.rows; r++) {
             for (int c = 0; c < nav.cols; c++) {
                 float x = nav.cellCenterX(c);
                 float z = nav.cellCenterZ(r);
                 boolean walkable;
-                if (z > HALF_DEPTH - 0.25f) {
-                    // Only the doorway pierces the front wall.
-                    walkable = x > DOOR_MIN_X + 0.15f && x < DOOR_MAX_X - 0.15f && z < HALF_DEPTH + 1.6f;
+                if (z > ShopLayout.HALF_DEPTH - 0.30f) {
+                    walkable = x > ShopLayout.DOOR_MIN_X + 0.25f
+                            && x < ShopLayout.DOOR_MAX_X - 0.25f
+                            && z < ShopLayout.HALF_DEPTH + 2.0f;
                 } else {
-                    walkable = x > -HALF_WIDTH + 0.3f && x < HALF_WIDTH - 0.3f
-                            && z > -HALF_DEPTH + 0.3f;
+                    // Clear by more than a character's radius: a path that hugs a
+                    // shelf corner is one nobody can actually walk down.
+                    walkable = ShopLayout.insideRoom(x, z, 0.45f)
+                            && !collision.blocked(x, z, NAV_CLEARANCE);
                 }
                 if (!walkable) nav.blockRect(x, z, x, z, 0f);
             }
         }
-        for (int i = 0; i < shelves.size(); i++) {
-            Shelf s = shelves.get(i);
-            if (!s.owned) continue;
-            nav.blockRect(s.x - SHELF_WIDTH * 0.5f, s.z - SHELF_DEPTH * 0.5f,
-                    s.x + SHELF_WIDTH * 0.5f, s.z + SHELF_DEPTH * 0.5f, 0.18f);
-        }
-        nav.blockRect(COUNTER_MIN_X, COUNTER_MIN_Z, COUNTER_MAX_X, COUNTER_MAX_Z, 0.12f);
     }
 
-    /** Creates or removes staff so the crowd matches the purchased upgrades. */
+    private boolean pathTo(Actor actor, float x, float z) {
+        if (nav.findPath(actor.position.x, actor.position.z, x, z, pathScratch)) {
+            actor.setPath(pathScratch);
+            return true;
+        }
+        pathScratch.clear();
+        pathScratch.add(new float[]{x, z});
+        actor.setPath(pathScratch);
+        return false;
+    }
+
+    // ------------------------------------------------------------------ staff
+
     public void syncStaff() {
         int wantCashiers = state.cashierCount();
         int wantStockers = state.stockerCount();
@@ -155,62 +144,22 @@ public final class Shop {
         }
         while (haveCashiers < wantCashiers) {
             Staff s = new Staff(Staff.Role.CASHIER, rng);
-            float offset = haveCashiers * 1.35f;
-            s.setHome(CASHIER_X - offset, CASHIER_Z, 0f);
+            s.setHome(ShopLayout.SERVE_X - 1.45f - haveCashiers * 1.2f, ShopLayout.SERVE_Z, 0f);
             s.teleport(s.homeX, s.homeZ);
-            s.heading = 0f;
             staff.add(s);
             haveCashiers++;
         }
         while (haveStockers < wantStockers) {
             Staff s = new Staff(Staff.Role.STOCKER, rng);
-            s.setHome(STOCKROOM_X + 1.2f + haveStockers * 0.9f, STOCKROOM_Z + 1.1f, (float) Math.PI);
+            s.setHome(ShopLayout.STOCKROOM_STAND_X + 1.4f + haveStockers * 0.9f,
+                    ShopLayout.STOCKROOM_STAND_Z + 0.5f, (float) Math.PI);
             s.teleport(s.homeX, s.homeZ);
             staff.add(s);
             haveStockers++;
         }
     }
 
-    // ------------------------------------------------------------------ helpers
-
-    public int ownedShelfCount() {
-        int n = 0;
-        for (int i = 0; i < shelves.size(); i++) if (shelves.get(i).owned) n++;
-        return n;
-    }
-
-    public Shelf shelf(int index) {
-        return index >= 0 && index < shelves.size() ? shelves.get(index) : null;
-    }
-
-    public int queueLength() { return queue.size(); }
-
-    public Customer customerAtRegister() { return atRegister; }
-
-    public float queueSlotX(int slot) { return QUEUE_HEAD_X + slot * QUEUE_SPACING; }
-
-    private boolean pathTo(Agent agent, float x, float z) {
-        if (nav.findPath(agent.pos.x, agent.pos.z, x, z, pathScratch)) {
-            agent.setPath(pathScratch);
-            return true;
-        }
-        // Fall back to a straight line so an agent never freezes on a bad target.
-        pathScratch.clear();
-        pathScratch.add(new float[]{x, z});
-        agent.setPath(pathScratch);
-        return false;
-    }
-
-    public void addPopup(float x, float y, float z, String text, int color) {
-        Popup p = new Popup();
-        p.x = x; p.y = y; p.z = z;
-        p.text = text;
-        p.color = color;
-        p.life = 1.5f;
-        popups.add(p);
-    }
-
-    // ------------------------------------------------------------------- update
+    // ----------------------------------------------------------------- update
 
     public void update(float dt) {
         pendingLevelUps = 0;
@@ -218,8 +167,10 @@ public final class Shop {
         updateSpawning(dt);
         updateCustomers(dt);
         updateStaff(dt);
-        updateShelfEffects(dt);
+        updatePlayerTask(dt);
+        updateInteraction();
         updatePopups(dt);
+        player.updatePose(dt);
     }
 
     private void advanceClock(float dt) {
@@ -249,23 +200,21 @@ public final class Shop {
         state.dayCosts = 0;
         state.dayServed = 0;
         state.dayLost = 0;
-        // Reputation drifts back toward neutral so a bad day is recoverable.
         state.adjustSatisfaction((0.72f - state.satisfaction) * 0.18f);
         pendingSummary = summary;
     }
 
     private void updateSpawning(float dt) {
-        if (!state.isOpen()) return;
-        if (customers.size() >= 26) return;
+        if (!state.isOpen() || customers.size() >= 14) return;
 
-        float rate = 0.17f * state.marketingMultiplier() * state.trafficCurve()
+        float rate = 0.16f * state.marketingMultiplier() * state.trafficCurve()
                 * (0.55f + state.satisfaction * 0.85f);
-        // Nobody comes in if there is nothing on the shelves.
-        if (!anyShelfStocked()) rate *= 0.12f;
-        // People passing a long queue keep walking, which is kinder than letting
-        // them come in and storm out again.
+        if (!anyShelfStocked()) rate *= 0.10f;
         int waiting = queue.size();
-        if (waiting >= 3) rate *= Math.max(0.12f, 1f - (waiting - 2) * 0.22f);
+        // People who can see a long queue through the window keep walking, which is
+        // kinder than letting them come in and storm out.
+        if (waiting >= 3) rate *= Math.max(0.12f, 1f - (waiting - 2) * 0.24f);
+
         spawnAccumulator += rate * dt;
         while (spawnAccumulator >= 1f) {
             spawnAccumulator -= 1f;
@@ -280,18 +229,18 @@ public final class Shop {
         return false;
     }
 
-    private final boolean[] availability = new boolean[ProductType.ALL.length];
-
     private void spawnCustomer() {
         for (int i = 0; i < availability.length; i++) availability[i] = false;
         for (int i = 0; i < shelves.size(); i++) {
             Shelf s = shelves.get(i);
-            if (s.owned && s.product != null && s.stock > 0) availability[s.product.ordinal()] = true;
+            if (s.owned && s.product != null && s.stock > 0) {
+                availability[s.product.ordinal()] = true;
+            }
         }
         Customer c = new Customer();
         c.init(rng, state, state.priceTolerance(), availability);
-        float spawnX = DOOR_CENTER_X + (rng.nextFloat() - 0.5f) * 0.8f;
-        c.teleport(spawnX, HALF_DEPTH + 1.4f);
+        c.teleport(ShopLayout.DOOR_CENTER_X + (rng.nextFloat() - 0.5f) * 0.9f,
+                ShopLayout.HALF_DEPTH + 1.5f);
         c.heading = (float) Math.PI;
         customers.add(c);
         chooseNextGoal(c);
@@ -300,8 +249,6 @@ public final class Shop {
     /** Sends a shopper to the best shelf for their list, or to the till, or home. */
     private void chooseNextGoal(Customer c) {
         Shelf best = null;
-        // Scores are routinely negative once distance is subtracted, so the seed
-        // has to be lower than any real candidate.
         float bestScore = -Float.MAX_VALUE;
         for (int w = 0; w < c.wants.size(); w++) {
             Customer.Want want = c.wants.get(w);
@@ -310,10 +257,11 @@ public final class Shop {
                 Shelf s = shelves.get(i);
                 if (!s.owned || s.product != want.product || s.stock <= 0) continue;
                 if (s.price > c.acceptablePrice(want.product)) continue;
-                // Prefer close shelves, and cheap ones when several carry the item.
-                float dist = (float) Math.hypot(s.approachX - c.pos.x, s.approachZ - c.pos.z);
-                float valueScore = 1f - MathUtil.clamp(s.price / Math.max(0.01f, c.acceptablePrice(want.product)), 0f, 1f);
-                float score = valueScore * 6f - dist * 0.25f;
+                float distance = (float) Math.hypot(s.approachX - c.position.x,
+                        s.approachZ - c.position.z);
+                float value = 1f - MathUtil.clamp(
+                        s.price / Math.max(0.01f, c.acceptablePrice(want.product)), 0f, 1f);
+                float score = value * 6f - distance * 0.22f;
                 if (score > bestScore) {
                     bestScore = score;
                     best = s;
@@ -324,50 +272,51 @@ public final class Shop {
         if (best != null) {
             c.targetShelf = best.index;
             c.enterState(Customer.State.TO_SHELF);
-            pathTo(c, best.approachX + (rng.nextFloat() - 0.5f) * 0.6f, best.approachZ);
+            c.animator.reachHeight = best.reachHeight(state);
+            pathTo(c, best.approachX + (rng.nextFloat() - 0.5f) * 0.7f, best.approachZ);
             return;
         }
-
-        if (!c.basket.isEmpty()) {
-            joinQueue(c);
-        } else {
-            leaveUpset(c, "Nothing to buy", 0.006f);
-        }
+        if (!c.basket.isEmpty()) joinQueue(c);
+        else leaveUpset(c, "Nothing for me", 0.006f);
     }
 
     private void joinQueue(Customer c) {
-        if (queue.size() >= MAX_QUEUE) {
+        if (queue.size() >= ShopLayout.MAX_QUEUE) {
             leaveUpset(c, "Queue too long", 0.020f);
             return;
         }
         c.queueSlot = queue.size();
         queue.add(c);
         c.enterState(Customer.State.TO_QUEUE);
-        pathTo(c, queueSlotX(c.queueSlot), QUEUE_Z);
+        pathTo(c, queueSlotX(c.queueSlot), ShopLayout.QUEUE_Z);
+    }
+
+    public float queueSlotX(int slot) {
+        return ShopLayout.QUEUE_HEAD_X + slot * ShopLayout.QUEUE_SPACING;
     }
 
     private void leaveUpset(Customer c, String reason, float satisfactionHit) {
         returnBasket(c);
         c.enterState(Customer.State.LEAVING_UPSET);
-        c.mood = 0.15f;
+        c.mood = 0.12f;
+        c.say(reason, 2.2f);
         removeFromQueue(c);
-        pathTo(c, DOOR_CENTER_X, HALF_DEPTH + 1.8f);
+        pathTo(c, ShopLayout.DOOR_CENTER_X, ShopLayout.HALF_DEPTH + 1.9f);
         state.adjustSatisfaction(-satisfactionHit);
         state.dayLost++;
         state.totalCustomersLost++;
-        addPopup(c.pos.x, 1.9f, c.pos.z, reason, 0xFFE05A5A);
+        addPopup(c.position.x, 1.95f, c.position.z, reason, 0xFFE0655A);
         if (listener != null) listener.onCustomerLost(reason);
     }
 
-    /** Puts abandoned items back where they came from so stock is never destroyed. */
+    /** Puts abandoned items back, so stock is never destroyed. */
     private void returnBasket(Customer c) {
         for (int i = 0; i < c.basket.size(); i++) {
             Customer.BasketItem item = c.basket.get(i);
             Shelf s = shelf(item.shelfIndex);
             if (s != null && s.product == item.product && s.stock < s.capacity(state)) {
-                s.stock++;
+                s.changeStock(1);
             } else {
-                // The shelf was refilled while they shopped, so it goes out the back.
                 state.stock[item.product.ordinal()]++;
             }
         }
@@ -380,7 +329,10 @@ public final class Shop {
             queue.remove(at);
             resequenceQueue();
         }
-        if (atRegister == c) atRegister = null;
+        if (servingCustomer == c) {
+            servingCustomer = null;
+            if (player.task == Player.Task.SERVING) player.finishTask();
+        }
         c.queueSlot = -1;
     }
 
@@ -391,7 +343,7 @@ public final class Shop {
             c.queueSlot = i;
             if (c.state == Customer.State.QUEUEING || c.state == Customer.State.TO_QUEUE) {
                 c.enterState(Customer.State.TO_QUEUE);
-                pathTo(c, queueSlotX(i), QUEUE_Z);
+                pathTo(c, queueSlotX(i), ShopLayout.QUEUE_Z);
             }
         }
     }
@@ -401,62 +353,73 @@ public final class Shop {
             Customer c = customers.get(i);
             c.stateTimer += dt;
             c.fadeIn = MathUtil.approach(c.fadeIn, 1f, dt * 2.5f);
-            c.bubbleTimer = Math.max(0f, c.bubbleTimer - dt);
-            c.carryBlend = MathUtil.approach(c.carryBlend, c.basket.isEmpty() ? 0f : 1f, dt * 3f);
-            c.rushBoost = Math.max(0f, c.rushBoost - dt);
+            boolean walking = false;
 
             switch (c.state) {
                 case ENTERING:
                 case TO_SHELF:
-                    stepToShelf(c, dt);
+                    walking = c.hasPath();
+                    if (c.followPath(dt, c.walkSpeed, collision) || !c.hasPath()) {
+                        Shelf s = shelf(c.targetShelf);
+                        if (s == null || !s.isStocked()) chooseNextGoal(c);
+                        else {
+                            c.enterState(Customer.State.BROWSING);
+                            c.animator.reachHeight = s.reachHeight(state);
+                        }
+                    }
                     break;
+
                 case BROWSING:
                     stepBrowsing(c, dt);
                     break;
+
                 case TO_QUEUE:
-                    stepToQueue(c, dt);
+                    walking = c.hasPath();
+                    c.patienceLeft -= dt * 0.4f;
+                    if (c.followPath(dt, c.walkSpeed, collision) || !c.hasPath()) {
+                        c.enterState(Customer.State.QUEUEING);
+                    }
                     break;
+
                 case QUEUEING:
-                    stepQueueing(c, dt);
+                    walking = stepQueueing(c, dt);
                     break;
-                case PAYING:
-                    stepPaying(c, dt);
+
+                case BEING_SERVED:
+                    c.faceTowards(ShopLayout.TILL_X, ShopLayout.TILL_Z, dt, 5f);
+                    c.patienceLeft -= dt * 0.25f;
+                    c.mood = MathUtil.clamp(c.patienceLeft / Math.max(1f, c.patience), 0f, 1f);
                     break;
+
                 case LEAVING:
                 case LEAVING_UPSET:
-                    stepLeaving(c, dt);
+                    walking = c.hasPath();
+                    c.followPath(dt, c.walkSpeed * 1.1f, collision);
+                    if (!c.hasPath()) {
+                        c.fadeOut -= dt * 1.5f;
+                        if (c.fadeOut <= 0f) c.finished = true;
+                    }
                     break;
             }
+
+            c.updateAnimation(dt, walking);
+            c.updatePose(dt);
 
             if (c.finished) {
                 removeFromQueue(c);
                 customers.remove(i);
             }
         }
-        promoteQueue();
-    }
-
-    private void stepToShelf(Customer c, float dt) {
-        boolean reached = c.advance(dt);
-        if (!reached && c.hasPath()) return;
-        Shelf s = shelf(c.targetShelf);
-        if (s == null || !s.isStocked()) {
-            chooseNextGoal(c);
-            return;
-        }
-        c.enterState(Customer.State.BROWSING);
     }
 
     private void stepBrowsing(Customer c, float dt) {
-        c.advance(dt);
         Shelf s = shelf(c.targetShelf);
         if (s == null) {
             chooseNextGoal(c);
             return;
         }
-        c.faceTowards(s.x, s.z, dt);
-        s.highlight = 1f;
-        float browseTime = 1.1f + (c.heightScale - 0.9f) * 2f;
+        c.faceTowards(s.x, s.z, dt, 6f);
+        float browseTime = 1.6f + (c.appearance.height - 0.9f) * 2.2f;
         if (c.stateTimer < browseTime) return;
 
         if (s.stock <= 0 || s.price > c.acceptablePrice(s.product)) {
@@ -471,93 +434,98 @@ public final class Shop {
             }
         }
         int taken = Math.min(wanted, s.stock);
-        s.stock -= taken;
+        s.changeStock(-taken);
         for (int i = 0; i < taken; i++) {
             c.basket.add(new Customer.BasketItem(s.product, s.index, s.price));
         }
         c.satisfyWant(s.product, taken);
-        c.bubbleTimer = 1.4f;
+        c.say(taken + "x " + s.product.displayName, 1.6f);
         c.targetShelf = -1;
         chooseNextGoal(c);
     }
 
-    private void stepToQueue(Customer c, float dt) {
-        boolean reached = c.advance(dt);
-        c.patienceLeft -= dt * 0.4f;
-        if (reached || !c.hasPath()) {
-            c.enterState(Customer.State.QUEUEING);
-        }
-    }
-
-    private void stepQueueing(Customer c, float dt) {
-        // Keep drifting toward the assigned slot as the line shuffles forward.
+    /** @return true when the shopper is still shuffling toward their slot */
+    private boolean stepQueueing(Customer c, float dt) {
         float slotX = queueSlotX(c.queueSlot);
-        float dx = slotX - c.pos.x;
-        float dz = QUEUE_Z - c.pos.z;
-        float dist = (float) Math.sqrt(dx * dx + dz * dz);
-        if (dist > 0.08f) {
-            float step = Math.min(c.speed * dt, dist);
-            c.pos.x += dx / dist * step;
-            c.pos.z += dz / dist * step;
-            c.walkPhase += step * 4.4f;
-            c.walkBlend = MathUtil.approach(c.walkBlend, 1f, dt * 6f);
-        } else {
-            c.walkBlend = MathUtil.approach(c.walkBlend, 0f, dt * 6f);
+        float dx = slotX - c.position.x;
+        float dz = ShopLayout.QUEUE_Z - c.position.z;
+        float distance = (float) Math.sqrt(dx * dx + dz * dz);
+        boolean moving = distance > 0.10f;
+        if (moving) {
+            float step = Math.min(c.walkSpeed * dt, distance);
+            c.position.x += dx / distance * step;
+            c.position.z += dz / distance * step;
         }
-        c.faceTowards(REGISTER_X, REGISTER_Z, dt);
+        c.faceTowards(ShopLayout.TILL_X, ShopLayout.TILL_Z, dt, 5f);
 
         c.patienceLeft -= dt;
         c.mood = MathUtil.clamp(c.patienceLeft / Math.max(1f, c.patience), 0f, 1f);
-        if (c.patienceLeft <= 0f) {
-            leaveUpset(c, "Waited too long", 0.022f);
-        }
+        if (c.patienceLeft <= 0f) leaveUpset(c, "Waited too long", 0.024f);
+        return moving;
     }
 
-    private void promoteQueue() {
-        if (atRegister != null) return;
-        if (queue.isEmpty()) return;
-        Customer head = queue.get(0);
-        if (head.state != Customer.State.QUEUEING) return;
-        if (Math.abs(head.pos.x - queueSlotX(0)) > 0.4f) return;
+    // ------------------------------------------------------------ player work
 
-        boolean hasCashier = state.cashierCount() > 0;
-        atRegister = head;
-        head.enterState(Customer.State.PAYING);
-        head.serviceProgress = 0f;
-        head.servedByStaff = hasCashier;
-        head.serviceDuration = state.checkoutDuration() * (hasCashier ? 1f : 1.35f);
-    }
+    private void updatePlayerTask(float dt) {
+        player.updateTaskAnimation(dt);
+        if (player.task == Player.Task.FREE) return;
 
-    private void stepPaying(Customer c, float dt) {
-        float targetX = queueSlotX(0);
-        float dx = targetX - c.pos.x;
-        float dz = QUEUE_Z - c.pos.z;
-        float dist = (float) Math.sqrt(dx * dx + dz * dz);
-        if (dist > 0.06f) {
-            float step = Math.min(c.speed * dt, dist);
-            c.pos.x += dx / dist * step;
-            c.pos.z += dz / dist * step;
-        }
-        c.faceTowards(REGISTER_X, REGISTER_Z, dt);
-        c.walkBlend = MathUtil.approach(c.walkBlend, 0f, dt * 6f);
+        player.actionProgress += dt;
 
-        // Tapping the shopper adds a burst of service speed; a cashier works steadily.
-        float rate = 1f + (c.rushBoost > 0f ? 1.6f : 0f);
-        if (!c.servedByStaff && c.rushBoost <= 0f) rate *= 0.5f;
-        c.serviceProgress += dt * rate;
+        if (player.task == Player.Task.STOCKING) {
+            Shelf s = shelf(player.actionShelf);
+            if (s == null || !player.isCarrying()) {
+                player.finishTask();
+                return;
+            }
+            player.faceTowards(s.x, s.z, dt, 6f);
+            player.animator.reachHeight = s.reachHeight(state);
 
-        c.patienceLeft -= dt * 0.5f;
-        c.mood = MathUtil.clamp(c.patienceLeft / Math.max(1f, c.patience), 0f, 1f);
-        if (c.patienceLeft <= 0f) {
-            leaveUpset(c, "Gave up at till", 0.030f);
+            float perUnit = player.actionDuration / Math.max(1, stockingUnits);
+            while (stockedSoFar < stockingUnits
+                    && player.actionProgress >= perUnit * (stockedSoFar + 1)) {
+                if (s.stock >= s.capacity(state) || player.carryCount <= 0) break;
+                s.changeStock(1);
+                player.carryCount--;
+                stockedSoFar++;
+            }
+            if (player.carryCount <= 0) player.carrying = null;
+            if (player.actionProgress >= player.actionDuration
+                    || stockedSoFar >= stockingUnits) {
+                if (listener != null && stockedSoFar > 0) listener.onStockPlaced(stockedSoFar);
+                addPopup(s.x, ShopLayout.SHELF_HEIGHT + 0.35f, s.z, "+" + stockedSoFar, 0xFF7FC4FF);
+                player.finishTask();
+            }
             return;
         }
-        if (c.serviceProgress >= c.serviceDuration) {
-            completeSale(c);
+
+        if (player.task == Player.Task.SERVING) {
+            Customer c = servingCustomer;
+            if (c == null || c.state != Customer.State.BEING_SERVED) {
+                player.finishTask();
+                return;
+            }
+            player.easeToward(ShopLayout.SERVE_X, ShopLayout.SERVE_Z, dt);
+            player.faceTowards(c.position.x, c.position.z, dt, 6f);
+
+            scanTimer += dt;
+            float perItem = state.scanTime();
+            while (c.scanned < c.basketCount() && scanTimer >= perItem) {
+                scanTimer -= perItem;
+                c.scanned++;
+                if (listener != null) listener.onScanBeep();
+            }
+            if (c.scanned >= c.basketCount()) {
+                completeSale(c, false);
+                player.finishTask();
+            }
         }
     }
 
-    private void completeSale(Customer c) {
+    private int stockingUnits = 0;
+    private int stockedSoFar = 0;
+
+    private void completeSale(Customer c, boolean byStaff) {
         float total = c.basketTotal();
         int items = c.basketCount();
         state.money += total;
@@ -572,34 +540,28 @@ public final class Shop {
             valueRatio += item.pricePaid / Math.max(0.01f, item.product.basePrice);
         }
         valueRatio = items > 0 ? valueRatio / items : 1f;
-        // Cheap relative to the base price makes people happy; gouging does not.
-        state.adjustSatisfaction(MathUtil.clamp((1.15f - valueRatio) * 0.05f, -0.03f, 0.02f)
-                + c.mood * 0.006f);
+        state.adjustSatisfaction(MathUtil.clamp((1.15f - valueRatio) * 0.05f, -0.03f, 0.025f)
+                + c.mood * 0.008f);
 
-        int levels = state.addXp(6f + total * 0.08f);
+        int levels = state.addXp(7f + total * 0.09f);
         if (levels > 0) {
             pendingLevelUps += levels;
             if (listener != null) listener.onLevelUp(state.level);
         }
 
-        addPopup(c.pos.x, 1.95f, c.pos.z, "+" + Money.format(total), 0xFF6FE08A);
+        addPopup(c.position.x, 1.95f, c.position.z, "+" + Money.format(total), 0xFF6FE08A);
         if (listener != null) listener.onSale(total, items);
 
         c.basket.clear();
+        c.say("Thanks!", 1.8f);
         c.enterState(Customer.State.LEAVING);
+        servingCustomer = null;
+        servedByStaff = false;
         removeFromQueue(c);
-        pathTo(c, DOOR_CENTER_X, HALF_DEPTH + 1.8f);
+        pathTo(c, ShopLayout.DOOR_CENTER_X, ShopLayout.HALF_DEPTH + 1.9f);
     }
 
-    private void stepLeaving(Customer c, float dt) {
-        c.advance(dt);
-        if (!c.hasPath()) {
-            c.fadeOut -= dt * 1.6f;
-            if (c.fadeOut <= 0f) c.finished = true;
-        }
-    }
-
-    // -------------------------------------------------------------------- staff
+    // ----------------------------------------------------------------- staff
 
     private void updateStaff(float dt) {
         staffThinkTimer -= dt;
@@ -608,36 +570,63 @@ public final class Shop {
 
         for (int i = 0; i < staff.size(); i++) {
             Staff s = staff.get(i);
-            s.carryBlend = MathUtil.approach(s.carryBlend, s.isCarrying() ? 1f : 0f, dt * 4f);
-            if (s.role == Staff.Role.CASHIER) {
-                updateCashier(s, dt);
-            } else {
-                updateStocker(s, dt, think);
-            }
+            if (s.role == Staff.Role.CASHIER) updateCashier(s, dt);
+            else updateStocker(s, dt, think);
+            s.updatePose(dt);
         }
     }
 
     private void updateCashier(Staff s, float dt) {
-        float dx = s.homeX - s.pos.x, dz = s.homeZ - s.pos.z;
-        float dist = (float) Math.sqrt(dx * dx + dz * dz);
-        if (dist > 0.1f) {
-            s.advance(dt);
+        float dx = s.homeX - s.position.x;
+        float dz = s.homeZ - s.position.z;
+        boolean walking = dx * dx + dz * dz > 0.04f;
+        if (walking) {
             if (!s.hasPath()) pathTo(s, s.homeX, s.homeZ);
+            s.followPath(dt, s.walkSpeed, collision);
         } else {
-            s.stop();
-            s.walkBlend = MathUtil.approach(s.walkBlend, 0f, dt * 6f);
-            if (atRegister != null) {
-                s.faceTowards(atRegister.pos.x, atRegister.pos.z, dt);
-            } else {
-                s.heading = MathUtil.approachAngle(s.heading, 0f, dt * 3f);
+            s.clearPath();
+        }
+
+        boolean serving = false;
+        // A cashier takes the queue whenever the player is not already on it.
+        if (!walking && servingCustomer == null && !queue.isEmpty()
+                && player.task != Player.Task.SERVING) {
+            Customer head = queue.get(0);
+            if (head.state == Customer.State.QUEUEING
+                    && Math.abs(head.position.x - queueSlotX(0)) < 0.45f) {
+                servingCustomer = head;
+                servedByStaff = true;
+                head.enterState(Customer.State.BEING_SERVED);
+                head.scanned = 0;
+                scanTimer = 0f;
             }
         }
+        if (servedByStaff && servingCustomer != null) {
+            serving = true;
+            s.faceTowards(servingCustomer.position.x, servingCustomer.position.z, dt, 5f);
+            scanTimer += dt;
+            // Staff work steadily but a shade slower than an attentive owner.
+            float perItem = state.scanTime() * 1.25f;
+            while (servingCustomer.scanned < servingCustomer.basketCount() && scanTimer >= perItem) {
+                scanTimer -= perItem;
+                servingCustomer.scanned++;
+                if (listener != null) listener.onScanBeep();
+            }
+            if (servingCustomer.scanned >= servingCustomer.basketCount()) {
+                completeSale(servingCustomer, true);
+            }
+        } else if (!walking) {
+            s.faceTowards(ShopLayout.QUEUE_HEAD_X, ShopLayout.QUEUE_Z, dt, 3f);
+        }
+        s.updateAnimation(dt, walking, serving, false);
     }
 
     private void updateStocker(Staff s, float dt, boolean think) {
+        boolean walking = false;
+        boolean stocking = false;
+
         switch (s.task) {
             case IDLE:
-                s.advance(dt);
                 if (think && state.autoRestockEnabled) {
                     Shelf target = findRestockTarget();
                     if (target != null) {
@@ -645,24 +634,21 @@ public final class Shop {
                         s.targetShelf = target.index;
                         s.carrying = target.product;
                         s.task = Staff.Task.TO_STOCKROOM;
-                        pathTo(s, STOCKROOM_X + 0.9f, STOCKROOM_Z + 1.0f);
-                    } else if (!s.hasPath()) {
-                        s.faceTowards(s.pos.x + (float) Math.sin(s.homeHeading),
-                                s.pos.z + (float) Math.cos(s.homeHeading), dt);
+                        pathTo(s, ShopLayout.STOCKROOM_STAND_X, ShopLayout.STOCKROOM_STAND_Z);
                     }
                 }
                 break;
 
             case TO_STOCKROOM:
-                if (s.advance(dt) || !s.hasPath()) {
+                walking = s.hasPath();
+                if (s.followPath(dt, s.walkSpeed, collision) || !s.hasPath()) {
                     s.task = Staff.Task.LOADING;
-                    s.taskTimer = 0.8f;
+                    s.taskTimer = 1.0f;
                 }
                 break;
 
             case LOADING: {
                 s.taskTimer -= dt;
-                s.walkBlend = MathUtil.approach(s.walkBlend, 0f, dt * 6f);
                 if (s.taskTimer > 0f) break;
                 Shelf target = shelf(s.targetShelf);
                 if (target == null || target.product != s.carrying) {
@@ -671,7 +657,7 @@ public final class Shop {
                 }
                 int room = target.capacity(state) - target.stock;
                 int available = state.stock[s.carrying.ordinal()];
-                int load = Math.min(Math.min(room, available), 10);
+                int load = Math.min(Math.min(room, available), 12);
                 if (load <= 0) {
                     abortStockerTask(s);
                     break;
@@ -683,30 +669,32 @@ public final class Shop {
                 break;
             }
 
-            case TO_SHELF: {
-                if (s.advance(dt) || !s.hasPath()) {
+            case TO_SHELF:
+                walking = s.hasPath();
+                if (s.followPath(dt, s.walkSpeed, collision) || !s.hasPath()) {
                     s.task = Staff.Task.STOCKING;
-                    s.taskTimer = 1.1f;
+                    s.taskTimer = 1.6f;
+                    Shelf target = shelf(s.targetShelf);
+                    if (target != null) s.animator.reachHeight = target.reachHeight(state);
                 }
                 break;
-            }
 
             case STOCKING: {
+                stocking = true;
                 s.taskTimer -= dt;
-                s.walkBlend = MathUtil.approach(s.walkBlend, 0f, dt * 6f);
                 Shelf target = shelf(s.targetShelf);
                 if (target != null) {
-                    s.faceTowards(target.x, target.z, dt);
-                    target.highlight = 1f;
+                    s.faceTowards(target.x, target.z, dt, 5f);
+                    s.animator.reachHeight = target.reachHeight(state);
                 }
                 if (s.taskTimer > 0f) break;
                 if (target != null && target.product == s.carrying) {
                     int placed = Math.min(s.carryCount, target.capacity(state) - target.stock);
-                    target.stock += placed;
+                    target.changeStock(placed);
                     s.carryCount -= placed;
-                    addPopup(target.x, 2.0f, target.z, "+" + placed, 0xFF7FC4FF);
+                    addPopup(target.x, ShopLayout.SHELF_HEIGHT + 0.35f, target.z,
+                            "+" + placed, 0xFF7FC4FF);
                 }
-                // Anything that would not fit goes back to the stockroom.
                 if (s.carryCount > 0 && s.carrying != null) {
                     state.stock[s.carrying.ordinal()] += s.carryCount;
                     s.carryCount = 0;
@@ -720,11 +708,13 @@ public final class Shop {
             }
 
             case RETURNING:
-                if (s.advance(dt) || !s.hasPath()) {
+                walking = s.hasPath();
+                if (s.followPath(dt, s.walkSpeed, collision) || !s.hasPath()) {
                     s.task = Staff.Task.IDLE;
                 }
                 break;
         }
+        s.updateAnimation(dt, walking, false, stocking);
     }
 
     private void abortStockerTask(Staff s) {
@@ -740,7 +730,6 @@ public final class Shop {
         pathTo(s, s.homeX, s.homeZ);
     }
 
-    /** The emptiest owned shelf whose product is sitting in the stockroom. */
     private Shelf findRestockTarget() {
         Shelf best = null;
         float worstFill = 0.7f;
@@ -757,44 +746,170 @@ public final class Shop {
         return best;
     }
 
-    private void updateShelfEffects(float dt) {
+    // ----------------------------------------------------------- interaction
+
+    private void updateInteraction() {
+        interaction.clear();
+        if (player.task != Player.Task.FREE) return;
+
+        float px = player.position.x, pz = player.position.z;
+
+        // Till takes priority: a waiting customer is the most urgent thing in the shop.
+        if (distance(px, pz, ShopLayout.SERVE_X, ShopLayout.SERVE_Z) < 1.30f) {
+            Customer head = queue.isEmpty() ? null : queue.get(0);
+            boolean ready = head != null
+                    && (head.state == Customer.State.QUEUEING || head.state == Customer.State.BEING_SERVED)
+                    && Math.abs(head.position.x - queueSlotX(0)) < 0.55f;
+            if (ready) {
+                interaction.set(Interaction.Kind.SERVE, "Serve customer",
+                        head.basketCount() + " items · " + Money.exact(head.basketTotal()),
+                        true, ShopLayout.TILL_X, 1.45f, ShopLayout.TILL_Z);
+            } else {
+                interaction.set(Interaction.Kind.SERVE, "Nobody waiting", null, false,
+                        ShopLayout.TILL_X, 1.45f, ShopLayout.TILL_Z);
+            }
+            return;
+        }
+
+        // Stockroom hatch.
+        if (distance(px, pz, ShopLayout.STOCKROOM_STAND_X, ShopLayout.STOCKROOM_STAND_Z) < 1.45f) {
+            if (player.isCarrying()) {
+                interaction.set(Interaction.Kind.RETURN_CRATE, "Put crate back",
+                        player.carryCount + "x " + player.carrying.displayName, true,
+                        ShopLayout.STOCKROOM_X, 1.45f, ShopLayout.STOCKROOM_Z + 0.3f);
+            } else {
+                int total = state.totalStock();
+                interaction.set(Interaction.Kind.COLLECT_STOCK,
+                        total > 0 ? "Collect stock" : "Stockroom empty",
+                        total > 0 ? total + " units waiting" : "Order more at the desk",
+                        total > 0, ShopLayout.STOCKROOM_X, 1.45f, ShopLayout.STOCKROOM_Z + 0.3f);
+            }
+            return;
+        }
+
+        // Back-office terminal.
+        if (distance(px, pz, ShopLayout.TERMINAL_STAND_X, ShopLayout.TERMINAL_STAND_Z) < 1.30f) {
+            interaction.set(Interaction.Kind.TERMINAL, "Open terminal",
+                    "Order stock · Upgrades", true,
+                    ShopLayout.TERMINAL_X, 1.35f, ShopLayout.TERMINAL_Z);
+            return;
+        }
+
+        // Nearest shelf.
+        Shelf nearest = null;
+        float nearestDistance = 1.70f;
         for (int i = 0; i < shelves.size(); i++) {
             Shelf s = shelves.get(i);
-            s.highlight = Math.max(0f, s.highlight - dt * 1.6f);
+            float d = distance(px, pz, s.approachX, s.approachZ);
+            if (d < nearestDistance) {
+                nearestDistance = d;
+                nearest = s;
+            }
         }
+        if (nearest == null) return;
+
+        float anchorY = ShopLayout.SHELF_HEIGHT + 0.30f;
+        if (!nearest.owned) {
+            boolean affordable = state.money >= nearest.purchaseCost;
+            interaction.set(Interaction.Kind.BUY_SHELF, "Fit shelving",
+                    Money.exact(nearest.purchaseCost), affordable, nearest.x, 1.1f, nearest.z);
+            interaction.shelfIndex = nearest.index;
+            return;
+        }
+
+        if (player.isCarrying()) {
+            boolean matches = nearest.product == null || nearest.product == player.carrying;
+            boolean room = nearest.product == null
+                    || nearest.stock < nearest.capacity(state);
+            interaction.set(Interaction.Kind.STOCK_SHELF,
+                    matches && room ? "Stock shelf" : (room ? "Wrong product" : "Shelf is full"),
+                    player.carryCount + "x " + player.carrying.displayName,
+                    matches && room, nearest.x, anchorY, nearest.z);
+            interaction.shelfIndex = nearest.index;
+            return;
+        }
+
+        interaction.set(Interaction.Kind.EDIT_SHELF, "Shelf settings",
+                nearest.product == null ? "Empty" :
+                        nearest.product.displayName + " · " + Money.exact(nearest.price)
+                                + " · " + nearest.stock + " left",
+                true, nearest.x, anchorY, nearest.z);
+        interaction.shelfIndex = nearest.index;
     }
 
-    private void updatePopups(float dt) {
-        for (int i = popups.size() - 1; i >= 0; i--) {
-            Popup p = popups.get(i);
-            p.age += dt;
-            p.y += dt * 0.55f;
-            if (p.age >= p.life) popups.remove(i);
-        }
+    private static float distance(float x0, float z0, float x1, float z1) {
+        float dx = x1 - x0, dz = z1 - z0;
+        return (float) Math.sqrt(dx * dx + dz * dz);
     }
 
-    // ----------------------------------------------------------- player actions
+    // -------------------------------------------------------- player actions
 
-    public boolean buyShelf(int index) {
-        Shelf s = shelf(index);
+    /** Picks up a crate of {@code product} from the stockroom. */
+    public boolean collectStock(ProductType product) {
+        if (product == null || player.isCarrying()) return false;
+        int available = state.stock[product.ordinal()];
+        if (available <= 0) return false;
+        int take = Math.min(available, player.carryCapacity(state));
+        state.stock[product.ordinal()] -= take;
+        player.carrying = product;
+        player.carryCount = take;
+        return true;
+    }
+
+    /** Puts a carried crate back in the stockroom. */
+    public boolean returnCrate() {
+        if (!player.isCarrying()) return false;
+        state.stock[player.carrying.ordinal()] += player.carryCount;
+        player.carrying = null;
+        player.carryCount = 0;
+        return true;
+    }
+
+    /** Starts filling a shelf from the crate the player is holding. */
+    public boolean stockShelf(int shelfIndex) {
+        Shelf s = shelf(shelfIndex);
+        if (s == null || !s.owned || !player.isCarrying()) return false;
+        if (s.product == null) s.assign(player.carrying);
+        else if (s.product != player.carrying) return false;
+
+        int room = s.capacity(state) - s.stock;
+        if (room <= 0) return false;
+        stockingUnits = Math.min(room, player.carryCount);
+        stockedSoFar = 0;
+        if (stockingUnits <= 0) return false;
+
+        player.easeToward(s.approachX, s.approachZ, 1f);
+        player.beginStocking(shelfIndex, s.reachHeight(state),
+                Math.max(0.9f, stockingUnits * 0.14f));
+        return true;
+    }
+
+    /** Starts scanning the basket of whoever is at the head of the queue. */
+    public boolean serveCustomer() {
+        if (queue.isEmpty() || servingCustomer != null) return false;
+        Customer head = queue.get(0);
+        if (head.state != Customer.State.QUEUEING) return false;
+        servingCustomer = head;
+        servedByStaff = false;
+        head.enterState(Customer.State.BEING_SERVED);
+        head.scanned = 0;
+        scanTimer = 0f;
+        player.beginServing(Math.max(0.6f, head.basketCount() * state.scanTime()));
+        return true;
+    }
+
+    public boolean buyShelf(int shelfIndex) {
+        Shelf s = shelf(shelfIndex);
         if (s == null || s.owned || state.money < s.purchaseCost) return false;
         state.money -= s.purchaseCost;
         state.dayCosts += s.purchaseCost;
         s.owned = true;
-        s.assign(firstUnlockedProduct());
-        rebuildNavigation();
-        addPopup(s.x, 1.6f, s.z, "New shelf!", 0xFFFFD166);
+        s.goodsDirty = true;
+        rebuildObstacles();
+        addPopup(s.x, 1.6f, s.z, "Shelving fitted", 0xFFFFD166);
         return true;
     }
 
-    private ProductType firstUnlockedProduct() {
-        for (int i = 0; i < ProductType.ALL.length; i++) {
-            if (ProductType.ALL[i].isUnlocked(state.level)) return ProductType.ALL[i];
-        }
-        return ProductType.BREAD;
-    }
-
-    /** Buys stock into the stockroom. Returns false when it is unaffordable. */
     public boolean orderStock(ProductType product, int quantity) {
         float cost = product.orderCost(quantity);
         if (state.money < cost) return false;
@@ -804,50 +919,10 @@ public final class Shop {
         return true;
     }
 
-    /** Moves goods from the stockroom onto a shelf; this is the manual restock tap. */
-    public int restockShelf(int index) {
-        Shelf s = shelf(index);
-        if (s == null || !s.owned || s.product == null) return 0;
-        int room = s.capacity(state) - s.stock;
-        int available = state.stock[s.product.ordinal()];
-        int moved = Math.min(room, available);
-        if (moved <= 0) return 0;
-        s.stock += moved;
-        state.stock[s.product.ordinal()] -= moved;
-        s.highlight = 1f;
-        addPopup(s.x, 2.0f, s.z, "+" + moved, 0xFF7FC4FF);
-        return moved;
-    }
-
-    /** Buys stock and puts it straight on the shelf in one action. */
-    public int quickRestock(int index) {
-        Shelf s = shelf(index);
-        if (s == null || !s.owned || s.product == null) return 0;
-        int room = s.capacity(state) - s.stock;
-        if (room <= 0) return 0;
-        int fromStockroom = Math.min(room, state.stock[s.product.ordinal()]);
-        int shortfall = room - fromStockroom;
-        if (shortfall > 0) {
-            int affordable = (int) (state.money / Math.max(0.01f, s.product.wholesaleCost));
-            int buy = Math.min(shortfall, affordable);
-            if (buy > 0) orderStock(s.product, buy);
-        }
-        return restockShelf(index);
-    }
-
-    /** Player tapped the shopper at the till: hurry the transaction along. */
-    public boolean serveAtRegister() {
-        if (atRegister == null) return false;
-        atRegister.rushBoost = 0.9f;
-        atRegister.serviceProgress += atRegister.serviceDuration * 0.22f;
-        return true;
-    }
-
     public boolean assignProduct(int shelfIndex, ProductType product) {
         Shelf s = shelf(shelfIndex);
         if (s == null || !s.owned || product == null || !product.isUnlocked(state.level)) return false;
         if (s.product == product) return true;
-        // Returning the old stock to the stockroom keeps re-merchandising lossless.
         if (s.product != null && s.stock > 0) {
             state.stock[s.product.ordinal()] += s.stock;
         }
@@ -861,51 +936,40 @@ public final class Shop {
         s.price = MathUtil.clamp(price, s.product.wholesaleCost * 0.5f, s.product.basePrice * 3f);
     }
 
-    /** Hit-tests a floor position against shelves, the till and shoppers. */
-    public Selection pick(float worldX, float worldZ) {
-        Selection best = new Selection();
-        float bestDist = Float.MAX_VALUE;
+    // --------------------------------------------------------------- queries
 
-        for (int i = 0; i < customers.size(); i++) {
-            Customer c = customers.get(i);
-            float d = (float) Math.hypot(c.pos.x - worldX, c.pos.z - worldZ);
-            if (d < 0.55f && d < bestDist) {
-                bestDist = d;
-                best.type = Selection.Type.CUSTOMER;
-                best.index = i;
-            }
-        }
-
-        for (int i = 0; i < shelves.size(); i++) {
-            Shelf s = shelves.get(i);
-            float halfW = SHELF_WIDTH * 0.5f + 0.35f;
-            float halfD = SHELF_DEPTH * 0.5f + 0.35f;
-            if (Math.abs(worldX - s.x) > halfW || Math.abs(worldZ - s.z) > halfD) continue;
-            float d = (float) Math.hypot(s.x - worldX, s.z - worldZ);
-            if (d < bestDist) {
-                bestDist = d;
-                best.type = Selection.Type.SHELF;
-                best.index = i;
-            }
-        }
-
-        if (worldX > COUNTER_MIN_X - 0.4f && worldX < COUNTER_MAX_X + 0.4f
-                && worldZ > COUNTER_MIN_Z - 0.6f && worldZ < COUNTER_MAX_Z + 0.6f) {
-            float d = (float) Math.hypot(REGISTER_X - worldX, REGISTER_Z - worldZ);
-            if (d < bestDist) {
-                best.type = Selection.Type.COUNTER;
-                best.index = -1;
-            }
-        }
-        return best;
+    public Shelf shelf(int index) {
+        return index >= 0 && index < shelves.size() ? shelves.get(index) : null;
     }
 
-    /** Result of a tap on the 3D view. */
-    public static final class Selection {
-        public enum Type { NONE, SHELF, CUSTOMER, COUNTER }
+    public int ownedShelfCount() {
+        int n = 0;
+        for (int i = 0; i < shelves.size(); i++) if (shelves.get(i).owned) n++;
+        return n;
+    }
 
-        public Type type = Type.NONE;
-        public int index = -1;
+    public int queueLength() { return queue.size(); }
+
+    public Customer queueHead() { return queue.isEmpty() ? null : queue.get(0); }
+
+    public Customer servingCustomer() { return servingCustomer; }
+
+    public void addPopup(float x, float y, float z, String text, int color) {
+        Popup p = new Popup();
+        p.x = x; p.y = y; p.z = z;
+        p.text = text;
+        p.color = color;
+        p.life = 1.6f;
+        popups.add(p);
+    }
+
+    private void updatePopups(float dt) {
+        for (int i = popups.size() - 1; i >= 0; i--) {
+            Popup p = popups.get(i);
+            p.age += dt;
+            p.y += dt * 0.55f;
+            if (p.age >= p.life) popups.remove(i);
+        }
     }
 
     /** Floating world-space label rendered by the 2D overlay. */

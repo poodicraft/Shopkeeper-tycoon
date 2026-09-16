@@ -1,15 +1,14 @@
 # Balance notes
 
-The numbers below are the tuning the game ships with, and why. They live in
-`game/ProductType.java`, `game/Upgrade.java`, `game/GameState.java` and
-`game/Shop.java`.
+The tuning the game ships with, and why. It lives in `game/ProductType.java`,
+`game/Upgrade.java`, `game/GameState.java` and `game/Shop.java`.
 
-## Day length
+## The day
 
-One in-game day is **180 seconds**. The shop trades between 6% and 92% of the
-day; outside that, footfall drops to a trickle. `GameState.trafficCurve()` layers
-a morning bump, a lunchtime peak and an evening rush over a flat base, so the
-rhythm of a day is visible without being punishing.
+One in-game day is **180 seconds**. The shop trades between 6% and 92% of it;
+outside that, footfall is a trickle. `GameState.trafficCurve()` layers a morning
+bump, a lunchtime peak and an evening rush over a flat base, so a day has a shape
+you can feel without being punishing.
 
 ## Products
 
@@ -24,48 +23,56 @@ rhythm of a day is visible without being punishing.
 | Sushi | 6 | $58 | $130 | 2.2x | 0.65 |
 | Caviar | 7 | $105 | $240 | 2.3x | 0.50 |
 
-Margins stay near 2.3x across the range, so higher tiers are worth more per sale
-without making the early game pointless. Demand weight falls as value rises,
-which is what stops a shop of pure caviar from being strictly correct.
+Margins hold near 2.3x across the range, so higher tiers are worth more per sale
+without making the early game pointless. Demand falls as value rises, which is what
+stops a shop of pure caviar from being strictly correct.
 
 ## Demand
 
-Each shopper rolls a personal willingness to pay:
+Each shopper rolls a personal ceiling:
 
 ```
 willingness = priceTolerance * (0.86 .. 1.20)
 ceiling     = product.basePrice * willingness
 ```
 
-`priceTolerance` starts at about 1.04 and rises with the Decor upgrade and with
-satisfaction. A shelf priced above a shopper's ceiling is skipped entirely.
+`priceTolerance` starts near 1.04 and rises with Decor and with satisfaction. A
+shelf priced above a shopper's ceiling is skipped entirely.
 
-Shopping lists are weighted 3.2x toward products actually on a shelf right now,
-and 0.55x toward everything else. Without that bias the early shop — which can
-only stock one or two lines — turns away most of its customers, which tested
-badly: the first few days were unwinnable.
+Shopping lists are weighted 3.2x toward products actually on a shelf right now and
+0.55x toward everything else. Without that bias the opening shop — which can only
+stock one or two lines — turns away most of its customers, which tested as
+unwinnable rather than difficult.
 
-## Throughput
+## The till
 
-Checkout takes `3.0s * 0.79^registerLevel`. With no cashier it runs at half speed
-and takes 1.35x as long, so serving by hand is worth roughly 2.7x the throughput
-of ignoring the queue — enough to make tapping matter without making idle play
-pointless.
+Scanning takes `0.52s * 0.82^scannerLevel` **per item**, and a basket holds one to
+six. That is the core tension: a big basket pins you behind the counter while
+shelves empty and the queue grows. A hired cashier works at 1.25x that time, so
+they are slower than an attentive owner but they never leave the till.
 
-Arrivals throttle once three people are waiting, falling to 12% of the base rate
-by the time the line is long. People who would have walked out simply never come
-in, which is both more realistic and much kinder to the satisfaction score than
-letting them enter and storm out.
+Arrivals throttle once three people are waiting, dropping to 12% of the base rate
+by the time the line is long. People who can see a queue through the window keep
+walking, which is both more believable and much kinder to the satisfaction score
+than letting them come in and storm out.
+
+## Carrying
+
+The player carries `10 + 4 * stockerLevel` units at a time and moves at 74% speed
+while loaded. Filling a shelf takes `0.14s` per unit. A full shelf is
+`12 + 6 * shelvingLevel` units, so restocking a maxed shelf is several trips —
+which is what makes hiring a stocker feel like a promotion rather than a discount.
 
 ## Costs
 
 - Rent: `$18 + $7 per shelf` per day
 - Wages: `$55 per cashier + $40 per stocker` per day
-- Shelves: `$140 * 1.52^n` for the nth slot, fifteen in total
+- Shelving: `$180 * 1.48^n` for the nth of twelve slots
 
 ## Reference results
 
-`tools/run-tests.sh` plays six days with an autopilot shopkeeper that never taps
-the till. It reaches level 4 with roughly $1,150 in the bank, serving 13-17
-customers a day and losing fewer than 5. A player who actually serves the queue
-does considerably better, which is the intended shape.
+`tools/run-tests.sh` plays five days with an autopilot shopkeeper that orders,
+carries, stocks and serves, but never optimises prices. It reaches level 4 with
+roughly $950 banked, serving 15-18 customers a day and losing three to eight. A
+player who actually watches the queue and prices deliberately does considerably
+better, which is the intended shape.

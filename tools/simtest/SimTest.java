@@ -1,33 +1,38 @@
+import com.poodicraft.shopkeeper.game.Collision;
 import com.poodicraft.shopkeeper.game.Customer;
 import com.poodicraft.shopkeeper.game.GameState;
+import com.poodicraft.shopkeeper.game.Interaction;
 import com.poodicraft.shopkeeper.game.Money;
-import com.poodicraft.shopkeeper.game.NavGrid;
+import com.poodicraft.shopkeeper.game.Player;
 import com.poodicraft.shopkeeper.game.ProductType;
 import com.poodicraft.shopkeeper.game.Shelf;
 import com.poodicraft.shopkeeper.game.Shop;
+import com.poodicraft.shopkeeper.game.Staff;
 import com.poodicraft.shopkeeper.game.Upgrade;
+import com.poodicraft.shopkeeper.world.ShopLayout;
 
 import java.util.ArrayList;
 
 /**
- * Headless check of the simulation.
+ * Headless play-through.
  *
- * <p>The game package deliberately has no Android imports, so the whole economy can
- * be driven on a plain JVM. This plays several in-game days with an autopilot
- * shopkeeper and asserts the invariants that matter: money and stock stay sane,
- * customers actually get served, and every shelf stays reachable.
+ * <p>The game package has no Android imports, so the whole shop can be driven on a
+ * plain JVM. The player here is not teleported: an autopilot paths across the floor
+ * and walks with the same collision the real controls use, so if a fitting boxes the
+ * player in or an interaction never triggers, this catches it.
  */
 public final class SimTest {
 
     private static int failures = 0;
     private static int checks = 0;
+    private static final float STEP = 1f / 45f;
 
     public static void main(String[] args) {
-        testNavigationReachesEveryShelf();
-        testCustomersGetServed();
-        testEconomyRunsForDays();
-        testPricingAffectsDemand();
+        testPlayerCanReachEverything();
+        testInteractionsAppear();
+        testFullShopkeeperLoop();
         testStockIsConserved();
+        testTradingDays();
 
         System.out.println();
         if (failures == 0) {
@@ -38,246 +43,449 @@ public final class SimTest {
         }
     }
 
-    // --------------------------------------------------------------------- tests
+    // --------------------------------------------------------------- walking
 
-    private static void testNavigationReachesEveryShelf() {
-        section("Navigation");
+    private static void testPlayerCanReachEverything() {
+        section("Getting around the shop");
         Shop shop = new Shop(new GameState());
         for (int i = 0; i < shop.shelves.size(); i++) shop.shelves.get(i).owned = true;
-        shop.rebuildNavigation();
+        shop.rebuildObstacles();
 
-        NavGrid nav = shop.nav;
-        ArrayList<float[]> path = new ArrayList<float[]>();
-        float doorX = Shop.DOOR_CENTER_X, doorZ = Shop.HALF_DEPTH + 1.2f;
+        check("the player starts somewhere walkable",
+                !shop.collision.blocked(shop.player.position.x, shop.player.position.z,
+                        shop.player.radius));
+
+        check("can walk to the till", walkTo(shop, ShopLayout.SERVE_X, ShopLayout.SERVE_Z, 22f));
+        check("can walk to the stockroom",
+                walkTo(shop, ShopLayout.STOCKROOM_STAND_X, ShopLayout.STOCKROOM_STAND_Z, 22f));
+        check("can walk to the back office",
+                walkTo(shop, ShopLayout.TERMINAL_STAND_X, ShopLayout.TERMINAL_STAND_Z, 22f));
 
         for (int i = 0; i < shop.shelves.size(); i++) {
             Shelf shelf = shop.shelves.get(i);
-            boolean found = nav.findPath(doorX, doorZ, shelf.approachX, shelf.approachZ, path);
-            check("path from door to shelf " + (i + 1), found && !path.isEmpty());
+            check("can walk to shelf " + (i + 1),
+                    walkTo(shop, shelf.approachX, shelf.approachZ, 22f));
         }
-        check("path from door to the till",
-                nav.findPath(doorX, doorZ, shop.queueSlotX(0), Shop.QUEUE_Z, path));
-        check("path from the stockroom to a shelf",
-                nav.findPath(Shop.STOCKROOM_X + 1f, Shop.STOCKROOM_Z + 1f,
-                        shop.shelves.get(14).approachX, shop.shelves.get(14).approachZ, path));
-        check("the shelf footprints are blocked",
-                !nav.isWalkableWorld(shop.shelves.get(0).x, shop.shelves.get(0).z));
-        check("the browsing spot in front of a shelf is walkable",
-                nav.isWalkableWorld(shop.shelves.get(0).approachX, shop.shelves.get(0).approachZ));
-        check("the counter is blocked",
-                !nav.isWalkableWorld(Shop.REGISTER_X, Shop.REGISTER_Z));
-        check("the queue line is walkable",
-                nav.isWalkableWorld(shop.queueSlotX(0), Shop.QUEUE_Z));
+        check("can walk back out of the door",
+                walkTo(shop, ShopLayout.DOOR_CENTER_X, ShopLayout.HALF_DEPTH - 0.9f, 22f));
+
+        // Collision must not let the player through the fittings.
+        check("the counter is solid",
+                shop.collision.blocked(ShopLayout.TILL_X, ShopLayout.TILL_Z, 0.3f));
+        check("shelves are solid",
+                shop.collision.blocked(shop.shelves.get(0).x, shop.shelves.get(0).z, 0.3f));
+        check("the spot in front of a shelf is clear",
+                !shop.collision.blocked(shop.shelves.get(0).approachX,
+                        shop.shelves.get(0).approachZ, 0.3f));
+        check("walls hold the player in",
+                shop.collision.blocked(0f, -ShopLayout.HALF_DEPTH - 0.5f, 0.3f));
     }
 
-    private static void testCustomersGetServed() {
-        section("Serving customers");
+    private static void testInteractionsAppear() {
+        section("Interaction prompts");
+        Shop shop = new Shop(new GameState());
+        shop.orderStock(ProductType.BREAD, 40);
+
+        walkTo(shop, ShopLayout.TERMINAL_STAND_X, ShopLayout.TERMINAL_STAND_Z, 22f);
+        settle(shop, 0.3f);
+        check("the office desk offers the terminal",
+                shop.interaction.kind == Interaction.Kind.TERMINAL);
+
+        walkTo(shop, ShopLayout.STOCKROOM_STAND_X, ShopLayout.STOCKROOM_STAND_Z, 22f);
+        settle(shop, 0.3f);
+        check("the stockroom offers a crate",
+                shop.interaction.kind == Interaction.Kind.COLLECT_STOCK
+                        && shop.interaction.enabled);
+
+        shop.collectStock(ProductType.BREAD);
+        check("picking up a crate fills the player's hands", shop.player.isCarrying());
+
+        Shelf shelf = shop.shelves.get(0);
+        walkTo(shop, shelf.approachX, shelf.approachZ, 22f);
+        settle(shop, 0.3f);
+        check("a shelf offers stocking while carrying",
+                shop.interaction.kind == Interaction.Kind.STOCK_SHELF
+                        && shop.interaction.enabled);
+
+        Shelf empty = null;
+        for (int i = 0; i < shop.shelves.size(); i++) {
+            if (!shop.shelves.get(i).owned) { empty = shop.shelves.get(i); break; }
+        }
+        shop.returnCrate();
+        walkTo(shop, empty.approachX, empty.approachZ, 22f);
+        settle(shop, 0.3f);
+        check("an empty slot offers shelving",
+                shop.interaction.kind == Interaction.Kind.BUY_SHELF);
+
+        walkTo(shop, ShopLayout.SERVE_X, ShopLayout.SERVE_Z, 22f);
+        settle(shop, 0.3f);
+        check("the till offers serving",
+                shop.interaction.kind == Interaction.Kind.SERVE);
+    }
+
+    // ------------------------------------------------------------- full loop
+
+    private static void testFullShopkeeperLoop() {
+        section("A shift behind the counter");
         Shop shop = new Shop(new GameState());
         GameState state = shop.state;
-        state.money = 5000;
-        state.upgradeLevels[Upgrade.CASHIER.ordinal()] = 1;
-        state.upgradeLevels[Upgrade.MARKETING.ordinal()] = 3;
-        shop.syncStaff();
+        state.money = 900;
+        state.dayTime = GameState.DAY_LENGTH * 0.40f;
 
-        shop.orderStock(ProductType.BREAD, 200);
-        shop.orderStock(ProductType.MILK, 200);
-        shop.restockShelf(0);
-        shop.restockShelf(1);
+        final int[] sales = new int[1];
+        final int[] beeps = new int[1];
+        final int[] placed = new int[1];
+        shop.listener = new Shop.Listener() {
+            @Override public void onSale(float amount, int itemCount) { sales[0]++; }
+            @Override public void onScanBeep() { beeps[0]++; }
+            @Override public void onCustomerLost(String reason) { }
+            @Override public void onLevelUp(int newLevel) { }
+            @Override public void onStockPlaced(int units) { placed[0] += units; }
+        };
 
-        // Start mid-morning so shoppers arrive straight away.
-        state.dayTime = GameState.DAY_LENGTH * 0.45f;
+        // Order at the desk.
+        walkTo(shop, ShopLayout.TERMINAL_STAND_X, ShopLayout.TERMINAL_STAND_Z, 25f);
+        check("ordering bread succeeds", shop.orderStock(ProductType.BREAD, 60));
+        check("ordering milk succeeds", shop.orderStock(ProductType.MILK, 60));
+
+        // Fill both shelves by hand.
+        for (int trip = 0; trip < 4; trip++) {
+            ProductType product = trip % 2 == 0 ? ProductType.BREAD : ProductType.MILK;
+            int shelfIndex = trip % 2;
+            walkTo(shop, ShopLayout.STOCKROOM_STAND_X, ShopLayout.STOCKROOM_STAND_Z, 25f);
+            shop.collectStock(product);
+            Shelf shelf = shop.shelves.get(shelfIndex);
+            walkTo(shop, shelf.approachX, shelf.approachZ, 25f);
+            shop.stockShelf(shelfIndex);
+            settle(shop, 3.5f);
+        }
+        check("bread made it onto the shelf (" + shop.shelves.get(0).stock + ")",
+                shop.shelves.get(0).stock > 0);
+        check("milk made it onto the shelf (" + shop.shelves.get(1).stock + ")",
+                shop.shelves.get(1).stock > 0);
+        check("stocking reported units placed (" + placed[0] + ")", placed[0] > 0);
+
+        // Work the till for the rest of the morning.
+        walkTo(shop, ShopLayout.SERVE_X, ShopLayout.SERVE_Z, 25f);
         double before = state.money;
-        int maxSeen = 0;
-        for (int step = 0; step < 60 * 90; step++) {
-            shop.update(1f / 60f);
-            maxSeen = Math.max(maxSeen, shop.customers.size());
-            if (state.dayTime > GameState.DAY_LENGTH * 0.85f) break;
+        float elapsed = 0f;
+        while (elapsed < 80f) {
+            stepIdle(shop);
+            elapsed += STEP;
+            if (shop.player.task == Player.Task.FREE
+                    && shop.interaction.kind == Interaction.Kind.SERVE
+                    && shop.interaction.enabled) {
+                shop.serveCustomer();
+            }
         }
-        check("shoppers came in (saw " + maxSeen + ")", maxSeen > 0);
-        check("someone was served (" + state.dayServed + ")", state.dayServed > 0);
+
+        check("shoppers came in", state.totalCustomersServed + state.totalCustomersLost > 0);
+        check("baskets were scanned item by item (" + beeps[0] + " beeps)", beeps[0] > 0);
+        check("sales completed (" + sales[0] + ")", sales[0] > 0);
         check("takings went up (" + Money.exact(state.money - before) + ")", state.money > before);
-        check("shelves were drawn down",
-                shop.shelves.get(0).stock < shop.shelf(0).capacity(state)
-                        || shop.shelves.get(1).stock < shop.shelf(1).capacity(state));
     }
 
-    private static void testEconomyRunsForDays() {
-        section("Autopilot shopkeeper, 6 days");
-        Shop shop = new Shop(new GameState());
-        GameState state = shop.state;
-
-        int summaries = 0;
-        double lowestMoney = state.money;
-        int totalSteps = (int) (GameState.DAY_LENGTH * 6 * 30);
-        for (int step = 0; step < totalSteps; step++) {
-            shop.update(1f / 30f);
-            if (step % 30 == 0) autopilot(shop);
-            if (shop.pendingSummary != null) {
-                Shop.DaySummary summary = shop.pendingSummary;
-                shop.pendingSummary = null;
-                summaries++;
-                System.out.printf("    day %d: revenue %s, profit %s, served %d, lost %d%n",
-                        summary.day, Money.exact(summary.revenue),
-                        Money.exact(summary.profit), summary.customersServed,
-                        summary.customersLost);
-            }
-            lowestMoney = Math.min(lowestMoney, state.money);
-            if (Double.isNaN(state.money) || Double.isInfinite(state.money)) break;
-        }
-
-        check("six days closed out", summaries == 6);
-        check("money stayed a real number", !Double.isNaN(state.money) && !Double.isInfinite(state.money));
-        check("satisfaction stayed in range", state.satisfaction >= 0f && state.satisfaction <= 1f);
-        check("the shop levelled up (level " + state.level + ")", state.level > 1);
-        check("customers were served (" + state.totalCustomersServed + ")",
-                state.totalCustomersServed > 20);
-        check("the shop turned a profit (" + Money.exact(state.money) + ")", state.money > 320);
-        for (int i = 0; i < state.stock.length; i++) {
-            check("stockroom count for " + ProductType.ALL[i].displayName + " is not negative",
-                    state.stock[i] >= 0);
-        }
-        for (int i = 0; i < shop.shelves.size(); i++) {
-            Shelf shelf = shop.shelves.get(i);
-            check("shelf " + (i + 1) + " is within capacity",
-                    shelf.stock >= 0 && shelf.stock <= shelf.capacity(state));
-        }
-    }
-
-    private static void testPricingAffectsDemand() {
-        section("Pricing pressure");
-        double cheapSales = runPricedDay(0.7f);
-        double dearSales = runPricedDay(2.0f);
-        System.out.printf("    cheap day sold %.0f units, expensive day sold %.0f units%n",
-                cheapSales, dearSales);
-        check("cutting prices sells more than gouging", cheapSales > dearSales);
-        check("an over-priced shelf still sells something or drives people out", dearSales >= 0);
-    }
-
-    private static double runPricedDay(float priceMultiplier) {
-        Shop shop = new Shop(new GameState());
-        GameState state = shop.state;
-        state.money = 9000;
-        state.upgradeLevels[Upgrade.CASHIER.ordinal()] = 2;
-        state.upgradeLevels[Upgrade.REGISTER.ordinal()] = 4;
-        shop.syncStaff();
-        shop.orderStock(ProductType.BREAD, 400);
-        shop.orderStock(ProductType.MILK, 400);
-        shop.setPrice(0, ProductType.BREAD.basePrice * priceMultiplier);
-        shop.setPrice(1, ProductType.MILK.basePrice * priceMultiplier);
-        shop.restockShelf(0);
-        shop.restockShelf(1);
-
-        state.dayTime = GameState.DAY_LENGTH * 0.35f;
-        int sold = 0;
-        for (int step = 0; step < 60 * 70; step++) {
-            shop.update(1f / 60f);
-            if (step % 60 == 0) {
-                shop.restockShelf(0);
-                shop.restockShelf(1);
-            }
-            if (state.dayTime > GameState.DAY_LENGTH * 0.8f) break;
-        }
-        sold = state.dayServed;
-        return sold;
-    }
+    // ----------------------------------------------------------- conservation
 
     private static void testStockIsConserved() {
         section("Stock conservation");
         Shop shop = new Shop(new GameState());
         GameState state = shop.state;
         state.money = 100000;
-        state.upgradeLevels[Upgrade.MARKETING.ordinal()] = 5;
+        state.upgradeLevels[Upgrade.MARKETING.ordinal()] = 4;
+        state.upgradeLevels[Upgrade.CASHIER.ordinal()] = 1;
+        state.upgradeLevels[Upgrade.STOCKER.ordinal()] = 1;
         shop.syncStaff();
 
-        // Only bread is ever on a shelf, so every item that moves is a loaf and the
-        // books have to balance exactly.
-        final int[] soldItems = new int[1];
+        // Only bread is ever on a shelf, so every unit that moves is a loaf.
+        shop.shelves.get(1).assign(ProductType.BREAD);
+        final int[] sold = new int[1];
         shop.listener = new Shop.Listener() {
-            @Override public void onSale(float amount, int itemCount) { soldItems[0] += itemCount; }
+            @Override public void onSale(float amount, int itemCount) { sold[0] += itemCount; }
+            @Override public void onScanBeep() { }
             @Override public void onCustomerLost(String reason) { }
             @Override public void onLevelUp(int newLevel) { }
+            @Override public void onStockPlaced(int units) { }
         };
 
-        shop.orderStock(ProductType.BREAD, 500);
-        shop.restockShelf(0);
-        int startTotal = state.stock[ProductType.BREAD.ordinal()] + shop.shelves.get(0).stock;
+        shop.orderStock(ProductType.BREAD, 400);
+        int start = state.stockOf(ProductType.BREAD);
 
         state.dayTime = GameState.DAY_LENGTH * 0.4f;
-        for (int step = 0; step < 60 * 240; step++) {
-            shop.update(1f / 60f);
-            if (step % 240 == 0) shop.restockShelf(0);
-        }
+        for (int i = 0; i < 45 * 200; i++) stepIdle(shop);
 
-        int inHands = 0;
+        int onShelves = 0;
+        for (int i = 0; i < shop.shelves.size(); i++) {
+            Shelf shelf = shop.shelves.get(i);
+            if (shelf.product == ProductType.BREAD) onShelves += shelf.stock;
+        }
+        int inBaskets = 0;
         for (int i = 0; i < shop.customers.size(); i++) {
             Customer c = shop.customers.get(i);
             for (int j = 0; j < c.basket.size(); j++) {
-                if (c.basket.get(j).product == ProductType.BREAD) inHands++;
+                if (c.basket.get(j).product == ProductType.BREAD) inBaskets++;
             }
         }
-        int accounted = state.stock[ProductType.BREAD.ordinal()]
-                + shop.shelves.get(0).stock + inHands + soldItems[0];
-        check("every loaf is accounted for (" + accounted + " of " + startTotal + ")",
-                accounted == startTotal);
-        check("some bread actually sold (" + soldItems[0] + ")", soldItems[0] > 0);
+        int inStaffHands = 0;
+        for (int i = 0; i < shop.staff.size(); i++) {
+            Staff s = shop.staff.get(i);
+            if (s.carrying == ProductType.BREAD) inStaffHands += s.carryCount;
+        }
+        int inPlayerHands = shop.player.carrying == ProductType.BREAD ? shop.player.carryCount : 0;
+
+        int accounted = state.stockOf(ProductType.BREAD) + onShelves + inBaskets
+                + inStaffHands + inPlayerHands + sold[0];
+        check("every loaf is accounted for (" + accounted + " of " + start + ")",
+                accounted == start);
+        check("some bread actually sold (" + sold[0] + ")", sold[0] > 0);
+        check("no shelf exceeds its capacity", noShelfOverfull(shop));
     }
 
-    // ----------------------------------------------------------------- autopilot
+    private static boolean noShelfOverfull(Shop shop) {
+        for (int i = 0; i < shop.shelves.size(); i++) {
+            Shelf shelf = shop.shelves.get(i);
+            if (shelf.stock < 0 || shelf.stock > shelf.capacity(shop.state)) return false;
+        }
+        return true;
+    }
 
-    /** Stands in for a player: buys stock, keeps shelves full, expands, upgrades. */
-    private static void autopilot(Shop shop) {
+    // ------------------------------------------------------------- economy
+
+    private static void testTradingDays() {
+        section("Five days with a working shopkeeper");
+        Shop shop = new Shop(new GameState());
         GameState state = shop.state;
 
-        // Keep every owned shelf assigned to the best product it can sell.
-        for (int i = 0; i < shop.shelves.size(); i++) {
-            Shelf shelf = shop.shelves.get(i);
-            if (!shelf.owned) continue;
-            if (shelf.product == null || !shelf.product.isUnlocked(state.level)) {
-                shop.assignProduct(i, bestUnlocked(state, i));
+        int summaries = 0;
+        double lowest = state.money;
+        float elapsed = 0f;
+        float total = GameState.DAY_LENGTH * 5;
+
+        while (elapsed < total) {
+            runAutopilot(shop);
+            elapsed += STEP;
+            lowest = Math.min(lowest, state.money);
+            if (shop.pendingSummary != null) {
+                Shop.DaySummary summary = shop.pendingSummary;
+                shop.pendingSummary = null;
+                summaries++;
+                System.out.printf("    day %d: revenue %s, profit %s, served %d, lost %d%n",
+                        summary.day, Money.exact(summary.revenue), Money.exact(summary.profit),
+                        summary.customersServed, summary.customersLost);
             }
-            if (shelf.product == null) continue;
-            shop.setPrice(i, shelf.product.basePrice * 0.95f);
-            if (shelf.fillRatio(state) < 0.35f) {
-                int room = shelf.capacity(state) - shelf.stock;
-                int have = state.stock[shelf.product.ordinal()];
-                if (have < room && state.money > shelf.product.orderCost(room) * 3) {
-                    shop.orderStock(shelf.product, room - have);
+            if (Double.isNaN(state.money)) break;
+        }
+
+        check("five days closed out", summaries == 5);
+        check("money stayed a real number",
+                !Double.isNaN(state.money) && !Double.isInfinite(state.money));
+        check("satisfaction stayed in range",
+                state.satisfaction >= 0f && state.satisfaction <= 1f);
+        check("the shop levelled up (level " + state.level + ")", state.level > 1);
+        check("customers were served (" + state.totalCustomersServed + ")",
+                state.totalCustomersServed > 25);
+        check("the shop turned a profit (" + Money.exact(state.money) + ")", state.money > 400);
+        check("no shelf exceeds its capacity", noShelfOverfull(shop));
+        for (int i = 0; i < ProductType.ALL.length; i++) {
+            check("stockroom count for " + ProductType.ALL[i].displayName + " is not negative",
+                    state.stockOf(ProductType.ALL[i]) >= 0);
+        }
+    }
+
+    // ----------------------------------------------------------- autopilot
+
+    private static int autopilotStage = 0;
+    private static ProductType autopilotProduct = ProductType.BREAD;
+    private static int autopilotShelf = 0;
+
+    /**
+     * Plays the game the way a person would: order stock, carry it out, fill a
+     * shelf, then stand at the till until the queue clears.
+     */
+    private static void runAutopilot(Shop shop) {
+        GameState state = shop.state;
+        Player player = shop.player;
+
+        if (player.task != Player.Task.FREE) {
+            stepIdle(shop);
+            return;
+        }
+
+        switch (autopilotStage) {
+            case 0: // Order whatever the shop is short of.
+                if (stepToward(shop, ShopLayout.TERMINAL_STAND_X, ShopLayout.TERMINAL_STAND_Z)) {
+                    autopilotProduct = neediestProduct(shop);
+                    if (state.stockOf(autopilotProduct) < 25
+                            && state.money > autopilotProduct.orderCost(30) * 2.2f) {
+                        shop.orderStock(autopilotProduct, 30);
+                    }
+                    buyWhatWeCanAfford(shop);
+                    autopilotStage = 1;
                 }
-                shop.restockShelf(i);
+                break;
+
+            case 1: // Fetch a crate.
+                if (stepToward(shop, ShopLayout.STOCKROOM_STAND_X, ShopLayout.STOCKROOM_STAND_Z)) {
+                    autopilotShelf = shelfNeeding(shop);
+                    if (autopilotShelf >= 0) {
+                        Shelf shelf = shop.shelves.get(autopilotShelf);
+                        ProductType want = shelf.product == null
+                                ? firstUnlocked(state) : shelf.product;
+                        if (shelf.product == null) shop.assignProduct(autopilotShelf, want);
+                        if (state.stockOf(want) > 0) shop.collectStock(want);
+                    }
+                    autopilotStage = shop.player.isCarrying() ? 2 : 3;
+                }
+                break;
+
+            case 2: { // Put it out.
+                Shelf shelf = shop.shelf(autopilotShelf);
+                if (shelf == null) { autopilotStage = 3; break; }
+                if (stepToward(shop, shelf.approachX, shelf.approachZ)) {
+                    if (!shop.stockShelf(autopilotShelf)) shop.returnCrate();
+                    autopilotStage = 3;
+                }
+                break;
             }
-        }
 
-        // Spend surplus on staff first, then capacity, then reach.
-        if (state.money > 3000 && state.upgradeLevel(Upgrade.CASHIER) == 0) {
-            if (state.buyUpgrade(Upgrade.CASHIER)) shop.syncStaff();
-        }
-        if (state.money > 4000 && state.upgradeLevel(Upgrade.STOCKER) == 0) {
-            if (state.buyUpgrade(Upgrade.STOCKER)) shop.syncStaff();
-        }
-        if (state.money > 2500) state.buyUpgrade(Upgrade.REGISTER);
-        if (state.money > 2500) state.buyUpgrade(Upgrade.MARKETING);
-
-        for (int i = 0; i < shop.shelves.size(); i++) {
-            Shelf shelf = shop.shelves.get(i);
-            if (!shelf.owned && state.money > shelf.purchaseCost * 4) {
-                shop.buyShelf(i);
-                shop.assignProduct(i, bestUnlocked(state, i));
+            default: { // Work the till until the queue is empty.
+                boolean atTill = stepToward(shop, ShopLayout.SERVE_X, ShopLayout.SERVE_Z);
+                if (atTill && shop.interaction.kind == Interaction.Kind.SERVE
+                        && shop.interaction.enabled) {
+                    shop.serveCustomer();
+                }
+                if (atTill && shop.queueLength() == 0 && shelfNeeding(shop) >= 0) {
+                    autopilotStage = 0;
+                }
                 break;
             }
         }
     }
 
-    private static ProductType bestUnlocked(GameState state, int seed) {
-        ProductType best = ProductType.BREAD;
-        ArrayList<ProductType> pool = new ArrayList<ProductType>();
-        for (int i = 0; i < ProductType.ALL.length; i++) {
-            if (ProductType.ALL[i].isUnlocked(state.level)) pool.add(ProductType.ALL[i]);
+    private static ProductType neediestProduct(Shop shop) {
+        ProductType best = firstUnlocked(shop.state);
+        int lowest = Integer.MAX_VALUE;
+        for (int i = 0; i < shop.shelves.size(); i++) {
+            Shelf shelf = shop.shelves.get(i);
+            if (!shelf.owned || shelf.product == null) continue;
+            int have = shop.state.stockOf(shelf.product);
+            if (have < lowest) {
+                lowest = have;
+                best = shelf.product;
+            }
         }
-        if (!pool.isEmpty()) best = pool.get(seed % pool.size());
         return best;
     }
 
-    // ------------------------------------------------------------------ plumbing
+    private static ProductType firstUnlocked(GameState state) {
+        for (int i = 0; i < ProductType.ALL.length; i++) {
+            if (ProductType.ALL[i].isUnlocked(state.level)) return ProductType.ALL[i];
+        }
+        return ProductType.BREAD;
+    }
+
+    private static int shelfNeeding(Shop shop) {
+        int best = -1;
+        float worst = 0.55f;
+        for (int i = 0; i < shop.shelves.size(); i++) {
+            Shelf shelf = shop.shelves.get(i);
+            if (!shelf.owned) continue;
+            ProductType product = shelf.product;
+            if (product != null && shop.state.stockOf(product) <= 0) continue;
+            float fill = shelf.fillRatio(shop.state);
+            if (fill < worst) {
+                worst = fill;
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    private static void buyWhatWeCanAfford(Shop shop) {
+        GameState state = shop.state;
+        if (state.money > 2600 && state.upgradeLevel(Upgrade.CASHIER) == 0) {
+            if (state.buyUpgrade(Upgrade.CASHIER)) shop.syncStaff();
+        }
+        if (state.money > 3000 && state.upgradeLevel(Upgrade.STOCKER) == 0) {
+            if (state.buyUpgrade(Upgrade.STOCKER)) shop.syncStaff();
+        }
+        if (state.money > 2200) state.buyUpgrade(Upgrade.REGISTER);
+        if (state.money > 2200) state.buyUpgrade(Upgrade.MARKETING);
+        for (int i = 0; i < shop.shelves.size(); i++) {
+            Shelf shelf = shop.shelves.get(i);
+            if (!shelf.owned && state.money > shelf.purchaseCost * 3.5f) {
+                shop.buyShelf(i);
+                shop.assignProduct(i, firstUnlocked(state));
+                break;
+            }
+        }
+    }
+
+    // ------------------------------------------------------------- movement
+
+    private static final ArrayList<float[]> pathBuffer = new ArrayList<float[]>();
+    private static float[] currentGoal = null;
+    private static int currentWaypoint = 0;
+
+    /** One frame of walking toward a goal; true once the player is standing there. */
+    private static boolean stepToward(Shop shop, float x, float z) {
+        Player player = shop.player;
+        float dx = x - player.position.x;
+        float dz = z - player.position.z;
+        if (dx * dx + dz * dz < 0.55f * 0.55f) {
+            stepIdle(shop);
+            currentGoal = null;
+            return true;
+        }
+        if (currentGoal == null || currentGoal[0] != x || currentGoal[1] != z) {
+            currentGoal = new float[]{x, z};
+            shop.nav.findPath(player.position.x, player.position.z, x, z, pathBuffer);
+            currentWaypoint = 0;
+        }
+        float targetX = x, targetZ = z;
+        if (currentWaypoint < pathBuffer.size()) {
+            float[] wp = pathBuffer.get(currentWaypoint);
+            float wdx = wp[0] - player.position.x, wdz = wp[1] - player.position.z;
+            if (wdx * wdx + wdz * wdz < 0.30f * 0.30f) currentWaypoint++;
+            else { targetX = wp[0]; targetZ = wp[1]; }
+        }
+        float ndx = targetX - player.position.x, ndz = targetZ - player.position.z;
+        float length = (float) Math.sqrt(ndx * ndx + ndz * ndz);
+        if (length > 1e-4f) { ndx /= length; ndz /= length; }
+
+        float beforeX = player.position.x, beforeZ = player.position.z;
+        player.move(ndx, ndz, true, STEP, shop.collision);
+        shop.update(STEP);
+
+        // Snagged on a fitting: drop the waypoint rather than grinding on it, which
+        // is what the simulated characters do too.
+        float movedX = player.position.x - beforeX, movedZ = player.position.z - beforeZ;
+        if (movedX * movedX + movedZ * movedZ < 1e-6f
+                && currentWaypoint < pathBuffer.size()) {
+            currentWaypoint++;
+        }
+        return false;
+    }
+
+    private static void stepIdle(Shop shop) {
+        shop.player.move(0f, 0f, false, STEP, shop.collision);
+        shop.update(STEP);
+    }
+
+    private static void settle(Shop shop, float seconds) {
+        for (float t = 0; t < seconds; t += STEP) stepIdle(shop);
+    }
+
+    /** Walks the player to a spot, giving up after {@code maxSeconds}. */
+    private static boolean walkTo(Shop shop, float x, float z, float maxSeconds) {
+        currentGoal = null;
+        for (float t = 0; t < maxSeconds; t += STEP) {
+            if (stepToward(shop, x, z)) return true;
+        }
+        return false;
+    }
+
+    // ------------------------------------------------------------- plumbing
 
     private static void section(String name) {
         System.out.println();

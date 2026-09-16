@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 #
-# Runs every off-device check against the game:
+# Every off-device check against the game:
 #
-#   GeometryTest  every primitive's triangles face the way their normals claim
-#   SceneTest     the whole 3D scene builds, with a sane triangle budget
-#   SimTest       navigation, the customer state machine and the economy
-#   shaders       the GLSL compiles as OpenGL ES 1.00 (needs glslangValidator)
+#   GeometryTest  every primitive is wound the way its normals claim, with a
+#                 valid tangent basis
+#   SceneTest     the whole 3D world and the skinned character build correctly,
+#                 inside a phone-sized triangle budget
+#   CharacterTest the rig and every animation pose, skinned the way the GPU will
+#   SimTest       walking, collision, interaction prompts, the shopkeeping loop
+#                 and the economy, played by an autopilot
+#   shaders       every GLSL variant compiles as OpenGL ES 3.00
 #
 # None of this needs a device or an emulator.
 
@@ -24,8 +28,10 @@ mkdir -p "$OUT"
 # Everything except the classes that genuinely need a live Android runtime.
 find "$SRC" -name '*.java' \
   ! -name 'SaveManager.java' \
+  ! -name 'LabelPainter.java' \
   ! -name 'MainActivity.java' \
   ! -name 'GameView.java' \
+  ! -name 'SceneRenderer.java' \
   ! -path '*/ui/*' \
   ! -path '*/audio/*' > "$OUT/srcs.txt"
 
@@ -34,22 +40,26 @@ javac -cp "$ANDROID_JAR" -d "$OUT" -nowarn \
   @"$OUT/srcs.txt" \
   "$ROOT/tools/simtest/GeometryTest.java" \
   "$ROOT/tools/simtest/SceneTest.java" \
+  "$ROOT/tools/simtest/CharacterTest.java" \
   "$ROOT/tools/simtest/SimTest.java" 2>&1 | grep -v '^Picked up' || true
 
-log "Geometry: triangle winding and normals"
+log "Geometry: winding, normals and tangents"
 java -cp "$OUT:$ANDROID_JAR" GeometryTest 2>&1 | grep -v '^Picked up'
 
-log "Scene: full asset build"
+log "Scene: the whole world and the character"
 java -cp "$OUT:$ANDROID_JAR" SceneTest 2>&1 | grep -v '^Picked up'
 
-log "Simulation: navigation, customers and the economy"
+log "Character: the rig, skinning and every animation pose"
+java -cp "$OUT:$ANDROID_JAR" CharacterTest 2>&1 | grep -v '^Picked up'
+
+log "Simulation: walking the shop and working a shift"
 java -cp "$OUT:$ANDROID_JAR" SimTest 2>&1 | grep -v '^Picked up'
 
 if command -v glslangValidator >/dev/null 2>&1; then
-  log "Shaders: compiling as OpenGL ES 1.00"
+  log "Shaders: compiling every variant as OpenGL ES 3.00"
   python3 "$ROOT/tools/extract_shaders.py" "$OUT/shaders" >/dev/null
-  glslangValidator "$OUT/shaders/shader.vert" "$OUT/shaders/shader.frag"
-  echo "  ok    both shaders compile"
+  glslangValidator "$OUT"/shaders/*.vert "$OUT"/shaders/*.frag
+  echo "  ok    all shader variants compile"
 else
   log "Shaders: skipped (install glslang-tools to enable)"
 fi

@@ -1,28 +1,30 @@
-# Shopkeeper Tycoon
+# Shopkeeper
 
-A 3D shop-management game for Android. You run a small corner shop: stock the
-shelves, set your prices, keep the queue moving, and reinvest the takings until
-you are selling caviar instead of bread.
+A third-person 3D shop game for Android. You don't manage a shop from above — you
+*are* the shopkeeper. You walk the aisles, carry crates out of the stockroom on
+your shoulder, kneel to fill the shelves by hand, and stand behind the counter
+scanning a customer's basket item by item while the queue watches.
 
-Everything renders in real 3D with OpenGL ES 2.0 — an orbiting camera, animated
-shoppers who path around the aisles, a day/night cycle — and the whole thing is
-plain Java against the Android framework. No game engine, no third-party
-libraries, no assets on disk: every mesh, texture-free material, icon and sound
-effect is generated in code.
+Everything renders in real 3D with OpenGL ES 3.0: a skinned character you see from
+behind, shadow-mapped lighting, normal-mapped surfaces, bloom and filmic tonemapping.
+It is plain Java against the Android framework — **no game engine, no third-party
+libraries, and not a single asset file**. Every mesh, texture, normal map, launcher
+icon and sound effect is generated in code at startup, which is why the whole game
+is a ~150 KB download.
 
-**The built APK is at [`dist/shopkeeper-tycoon.apk`](dist/shopkeeper-tycoon.apk)** (~100 KB).
+**The built APK is at [`dist/shopkeeper-tycoon.apk`](dist/shopkeeper-tycoon.apk).**
 
 ```
 adb install -r dist/shopkeeper-tycoon.apk
 ```
 
-Or copy it to a phone and open it. Android will ask you to allow installing from
-this source, because the APK is signed with a self-signed key rather than one
-registered with Google Play.
+Or copy it to a phone and tap it. Android will ask you to allow installing from
+this source, because it is signed with a self-signed key rather than one registered
+with Google Play.
 
-Requires Android 5.0 (API 21) or newer and a device with OpenGL ES 2.0, which in
-practice means any Android phone made in the last decade. No permissions, no
-network access, no ads.
+Needs Android 5.0 (API 21) or newer **and OpenGL ES 3.0**, which covers
+essentially every Android phone made since about 2013. No permissions, no network,
+no ads.
 
 ---
 
@@ -30,39 +32,45 @@ network access, no ads.
 
 | | |
 |---|---|
-| **One finger drag** | Orbit the camera around the shop |
-| **Two fingers drag** | Pan across the floor |
-| **Pinch** | Zoom in and out |
-| **Tap a shelf** | Empty shelf with goods out back: restock it instantly. Otherwise open the shelf editor |
-| **Tap the till or the shopper at it** | Hurry the transaction along |
-| **Tap a browsing shopper** | See what they came in for |
+| **Left thumb** | Virtual stick — walk. The base appears wherever you put your thumb down; push past the ring to run. |
+| **Right side, drag** | Look around. The camera orbits your character. |
+| **Pinch** | Pull the camera in or push it out. |
+| **Green button** | The one context action. Its label is whatever you're standing next to. |
 
-The loop is: buy stock into the stockroom → put it on a shelf → price it → serve
-the queue → spend the profit.
+The whole game is that one button plus your feet.
+
+**The loop.** Walk to the back-office desk in the far corner and order stock. It
+arrives in the stockroom. Walk to the stockroom hatch, pick up a crate — you'll see
+your character hoist it, and you'll move slower carrying it. Walk to a shelf and
+press the button: you crouch or reach for the right shelf height and fill it a unit
+at a time. Then get behind the till before the queue builds.
+
+**Serving is manual.** Standing at the till with someone waiting, the button reads
+*Serve customer*. Each item is scanned individually — you can see the running total
+over the counter — and the customer only pays when the basket is done. A big basket
+keeps you behind the counter while the rest of the shop waits.
 
 **Prices matter.** Every shopper has their own idea of what a thing is worth. Price
-below the base value and they buy happily; price well above it and they put it
-back and leave, which costs you satisfaction. Satisfaction feeds back into how
-many people come through the door.
+below the base value and they buy happily; price well above it and they put it back
+and walk out, which costs you reputation and, through that, footfall.
 
-**The till is the bottleneck.** Serving customers yourself by tapping is roughly
-twice as fast as leaving them to it. Once you can afford a **Cashier** the queue
-runs itself — and keeps earning while the app is closed.
+**Patience matters more.** Queueing drains it. The ring over a waiting customer's
+head is how long you have. Run it out and they abandon their basket and leave.
 
-**Upgrades**
+**Upgrades** are bought at the same desk:
 
-- **Register** — faster checkout, shorter queues
-- **Marketing** — more footfall
+- **Scanner** — less time per item at the till
+- **Marketing** — more people through the door
 - **Decor** — shoppers tolerate higher prices
 - **Shelving** — more units per shelf
-- **Cashier** — works the till for you, including offline
-- **Stocker** — carries goods from the stockroom to whichever shelf is emptiest
+- **Cashier** — works the till so you can stay on the floor, and keeps earning while the app is closed
+- **Stocker** — fetches crates and fills shelves for you
 
-Eight product tiers unlock as you level up, from Bread at level 1 to Caviar at
-level 7. Rent and wages come out at the end of each in-game day (three real
-minutes), so an expensive shop has to earn its keep.
-
+Eight product tiers unlock as you level, from Bread at level 1 to Caviar at level 7.
+Rent and wages come out at the end of each in-game day (three real minutes).
 Progress saves automatically when the app pauses.
+
+If the camera drag feels inverted to you, it's one sign in `GameView.orbit`.
 
 ---
 
@@ -70,8 +78,8 @@ Progress saves automatically when the app pauses.
 
 ### The tested path
 
-`build.sh` drives the Android build tools directly — no Gradle, no Android
-Studio, no network access:
+`build.sh` drives the Android build tools directly — no Gradle, no Android Studio,
+no network:
 
 ```
 javac  →  dx  →  aapt package  →  zipalign  →  apksigner
@@ -85,54 +93,70 @@ sudo apt-get install aapt dalvik-exchange zipalign apksigner \
 ./build.sh
 ```
 
-The APK lands in `build/shopkeeper-tycoon.apk`. A self-signed key is generated
-into `keystore/` on the first run (and is git-ignored). Every tool path can be
-overridden by environment variable — `AAPT`, `DX`, `ZIPALIGN`, `APKSIGNER`,
-`ANDROID_JAR`, `KEYSTORE`, and so on — if your SDK lives somewhere else.
+The APK lands in `build/`. A self-signed key is generated into `keystore/` on the
+first run (and is git-ignored). Every tool path can be overridden by environment
+variable — `AAPT`, `DX`, `ZIPALIGN`, `APKSIGNER`, `ANDROID_JAR`, `KEYSTORE`.
 
-The code compiles against the API 23 platform jar but targets API 34. It only
-calls framework APIs available in API 21+, so that combination is safe.
+The code compiles against the API 23 platform jar but targets API 34. Every
+framework call it makes exists in API 21+, so that pairing is safe.
 
 ### Android Studio
 
-Gradle files are included (`settings.gradle`, `build.gradle`, `app/build.gradle`)
-and the source tree already uses the standard layout, so the project opens in
-Android Studio directly. They are pinned to Android Gradle Plugin 7.4.2 because
-the manifest keeps its `package` attribute, which `build.sh` needs and AGP 8
-rejects.
+Gradle files are included and the source tree uses the standard layout, so the
+project opens in Studio directly. They are pinned to Android Gradle Plugin 7.4.2
+because the manifest keeps its `package` attribute, which `build.sh` needs and AGP
+8 rejects.
 
-Note that this Gradle path is provided for convenience and was **not** exercised
-while building this project — the environment it was developed in had no access
-to Google's Maven repository, so AGP could not be downloaded. `build.sh` is the
-path that actually produced the shipped APK.
+This Gradle path is provided for convenience and was **not** exercised while
+building the project — the environment had no access to Google's Maven repository,
+so AGP could not be downloaded. `build.sh` is what produced the shipped APK.
 
 ---
 
 ## Tests
 
-There is no emulator in the loop, so the checks that matter run on a plain JVM:
+There is no device or emulator in the loop, so the checks that matter run on a
+plain JVM:
 
 ```bash
 ./tools/run-tests.sh
 ```
 
-- **GeometryTest** — for every triangle of every primitive, the normal implied by
-  the vertex winding must agree with the normal stored on the vertices. Back-face
-  culling makes a mis-wound face vanish silently, and nothing else would catch
-  it. It found the cylinders and cones rendering inside out.
-- **SceneTest** — builds the entire 3D scene and checks the triangle budget. The
-  static shop is one draw call.
-- **SimTest** — pathfinding to every shelf, the customer state machine end to
-  end, six simulated days under an autopilot shopkeeper, and a strict
-  stock-conservation check. It found shoppers rejecting every shelf because of a
-  scoring bug, and stock being destroyed when a customer put something back on a
-  shelf that had been refilled meanwhile.
-- **shaders** — the GLSL is extracted from the Java source and compiled as
-  OpenGL ES 1.00 with `glslangValidator`, so a syntax error surfaces at build
-  time instead of as a black screen.
+**GeometryTest** — for every triangle of every primitive, the normal implied by the
+vertex winding must agree with the normal stored on the vertices, and the tangent
+basis must come out unit length and perpendicular to the normal. Back-face culling
+makes a mis-wound face vanish silently and a bad tangent lights a surface from the
+wrong direction; neither throws an error. This caught every cylinder and cone in
+the first build rendering inside out, and later caught `quadOriented` deciding both
+of a quad's triangles from the first one — which is meaningless when that triangle
+is degenerate, as it is at every sphere pole.
 
-The game package has no Android imports at all, which is what lets the whole
-economy be driven headlessly.
+**SceneTest** — builds the entire world and the skinned character, checks every mesh
+is well formed, that bone indices are real bones and weights sum to one, and that
+the triangle budget stays inside what a phone GPU will hold up under.
+
+**CharacterTest** — applies the real skinning matrices to the real mesh, the same way
+the vertex shader will, and asserts the body stays a body: an unposed skeleton
+leaves the mesh untouched, rotating a shoulder carries the hand but not the far
+foot, a bent shin keeps its length, every animation state stays between 0.95 m and
+2.1 m tall with no NaN, and the walk cycle lifts the ankle a walking amount rather
+than a marching one. That last check is what caught the first gait overshooting
+human hip and knee range by half again.
+
+**SimTest** — plays the game. An autopilot paths across the floor and walks with the
+same collision the real stick uses, so this covers reaching every shelf, the till,
+the stockroom and the desk; the interaction prompts appearing in the right places;
+the full order → carry → stock → serve loop; strict stock conservation; and five
+trading days of economy. It caught the navigation grid clearing obstacles at a
+smaller radius than the characters actually have, which produced paths that hug a
+shelf corner and trap anyone who follows them.
+
+**shaders** — every GLSL variant is extracted from the Java source and compiled as
+OpenGL ES 3.00 with `glslangValidator`, so a syntax error shows up at build time
+instead of as a black screen.
+
+The `game` package has no Android imports at all, which is what lets the whole shop
+be driven headlessly.
 
 ---
 
@@ -140,38 +164,56 @@ economy be driven headlessly.
 
 ```
 app/src/main/java/com/poodicraft/shopkeeper/
-  MainActivity.java     Lifecycle, wiring, save/load, all UI actions
-  GameView.java         GL thread: camera, gestures, frame loop, overlay projection
-  math/                 Vec3, Mat4, easing helpers
-  gl/                   Shader program, VBO mesh, procedural mesh builder,
-                        orbit camera with picking, the lit draw service
-  game/                 Pure-Java simulation: products, shelves, customers,
-                        staff, A* navigation, economy, saves
-  scene/                Procedural geometry for the shop and the people in it
-  ui/                   Code-built HUD, bottom sheets, and the 2D overlay
+  MainActivity.java     Lifecycle, wiring, save/load, every UI action
+  GameView.java         GL thread: camera, touch, frame loop, overlay projection
+  math/                 Vec2/Vec3, Mat4, quaternions, easing
+  gl/                   Shader, VAO mesh, texture arrays, framebuffers,
+                        procedural geometry, the third-person camera, and the
+                        render pipeline
+  art/                  Tiling noise, every material's pixels, the material table
+  character/            19-bone rig, the skinned humanoid generator, procedural
+                        animation
+  world/                Shop layout, the room and its fittings, shelf stock,
+                        and the bridge from simulation to draw calls
+  game/                 Pure-Java simulation: player, customers, staff, products,
+                        collision, A* navigation, economy, saves
+  ui/                   Virtual stick, action button, HUD panels, world overlay
   audio/                Synthesised sound effects — no audio files
 ```
 
-A few decisions worth knowing about:
+Some decisions worth knowing about.
 
-**One lock.** The GL thread holds `gameLock` for the whole of update-and-render;
-every UI action takes the same lock. Camera moves and taps are posted onto the GL
-thread with `queueEvent`, so picking uses a consistent camera.
+**The look comes from texture arrays.** Thirty-two materials — tile, plaster, oak,
+brushed steel, skin, denim, canvas, leather, corrugated card, printed packaging —
+are generated as pixels at startup, each with a matching normal map derived from
+its own height field. A material is a *vertex attribute* indexing into that array,
+so the entire shop, mixing every surface it has, still draws in one call.
 
-**The static shop is a single mesh.** Floor, walls, windows, counter, till,
-plants and lamps are baked into one vertex buffer at startup — 3,496 triangles,
-one draw call. Only shelves, goods and people are drawn per-object.
+**One mesh, many people.** Everyone in the shop shares a single 4,900-triangle
+skinned body. They differ by bone matrices, height, and a per-draw colour table
+keyed on material — skin, hair, shirt, trousers and shoes are separate materials,
+so one table turns the same geometry into a different person.
 
-**Meshes keep their vertex data.** If the EGL context is lost, every buffer name
-from the old context is dropped and the geometry is re-uploaded rather than
-silently drawing nothing.
+**Animation is written, not authored.** There are no animation files. Poses are
+built from curves — a walk cycle, a carry, a crouch, an arm reaching for a specific
+shelf height, a scanning hand — and layered as blend weights, which is why a
+shopkeeper can walk while carrying a crate and turn their head toward a customer at
+the same time.
 
-**The overlay copies rather than shares.** The GL thread projects world anchors
-into screen positions; `commit()` copies the values into objects the UI thread
-owns, so a draw in flight can never see a half-written label.
+**Every quad decides its own winding.** `GeometryBuilder.quadOriented` picks the
+winding that agrees with the vertices' own normals rather than trusting the call
+site, because parametric patches are exactly where sign errors hide.
 
-**Shaders avoid `mat3(mat4)`.** GLSL ES 1.00 has no matrix-from-matrix
-constructor, so the normal matrix is applied column by column.
+**One lock.** The GL thread holds `gameLock` across update-and-render; every UI
+action takes the same lock. The overlay publishes *copies* of its projected labels,
+so a draw in flight can never see a half-written one.
+
+**Quality steps down on its own.** Frame time is smoothed and, if it stays long,
+the renderer drops the shadow map and then the bloom and resolution. It never steps
+back up unasked, so the picture does not oscillate while you are looking at it.
+
+**Context loss is survivable.** Meshes and pixels live on the CPU side; a recreated
+EGL context drops the GPU names and re-uploads rather than silently drawing nothing.
 
 ## Licence
 
