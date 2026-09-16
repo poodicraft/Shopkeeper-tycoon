@@ -151,6 +151,10 @@ trading days of economy. It caught the navigation grid clearing obstacles at a
 smaller radius than the characters actually have, which produced paths that hug a
 shelf corner and trap anyone who follows them.
 
+**preview** — not a test, but the tool that makes the rest possible: `tools/preview`
+renders the character to PNGs so proportions, clothing fit and texture density can
+be judged rather than guessed.
+
 **shaders** — every GLSL variant is extracted from the Java source and compiled as
 OpenGL ES 3.00 with `glslangValidator`, so a syntax error shows up at build time
 instead of as a black screen.
@@ -193,6 +197,13 @@ so the entire shop, mixing every surface it has, still draws in one call.
 skinned body. They differ by bone matrices, height, and a per-draw colour table
 keyed on material — skin, hair, shirt, trousers and shoes are separate materials,
 so one table turns the same geometry into a different person.
+
+**The characters can be looked at offline.** `tools/preview` rasterises the same
+meshes, the same skinning matrices and the same albedo textures to PNGs on a plain
+JVM. Building a character by reasoning alone produced eyes and a nose buried inside
+the skull, an apron hanging off the chest as two flat slabs, and fabric textures at
+one repeat per metre that rendered as masonry. None of that shows up in a test that
+checks winding and bone weights; all of it is obvious in a picture.
 
 **Animation is written, not authored.** There are no animation files. Poses are
 built from curves — a walk cycle, a carry, a crouch, an arm reaching for a specific

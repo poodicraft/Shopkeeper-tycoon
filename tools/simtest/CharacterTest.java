@@ -19,7 +19,7 @@ public final class CharacterTest {
     private static int checks = 0;
 
     public static void main(String[] args) {
-        MeshData body = new CharacterMesh().buildBody(true);
+        MeshData body = new CharacterMesh().buildBody();
 
         testBindPose(body);
         testHierarchy();

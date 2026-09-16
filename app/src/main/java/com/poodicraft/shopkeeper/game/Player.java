@@ -42,6 +42,7 @@ public final class Player extends Actor {
         // The player wears the apron and reads as the owner rather than a shopper.
         appearance.shirt = 0x2F6E8E;
         appearance.apron = 0xF2EEE4;
+        appearance.wearsApron = true;
         appearance.height = 1.0f;
         appearance.markDirty();
         radius = 0.30f;

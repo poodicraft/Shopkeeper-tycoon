@@ -39,6 +39,8 @@ public final class Appearance {
     public int apron = 0xE8E4DA;
     /** 0 short, 1 long, 2 cropped. */
     public int hairStyle = 0;
+    /** Staff wear an apron; shoppers do not. */
+    public boolean wearsApron = false;
     /** Multiplies the whole skeleton; roughly 1.55 m to 1.92 m tall. */
     public float height = 1.0f;
 
@@ -65,6 +67,7 @@ public final class Appearance {
         a.shirt = 0x2E7D63;
         a.trousers = 0x2B303B;
         a.apron = 0xF0ECE2;
+        a.wearsApron = true;
         a.height = 0.96f + rng.nextFloat() * 0.10f;
         a.tintsDirty = true;
         return a;

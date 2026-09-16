@@ -31,6 +31,7 @@ public final class SceneRenderer {
     private GpuMesh shelfUnit;
     private GpuMesh crate;
     private GpuMesh body;
+    private GpuMesh apron;
     private final GpuMesh[] hair = new GpuMesh[HAIR_STYLES];
     private final GpuMesh[] shelfGoods = new GpuMesh[ShopLayout.SHELF_SLOTS];
 
@@ -56,7 +57,8 @@ public final class SceneRenderer {
         room = new GpuMesh(world.buildRoom());
         shelfUnit = new GpuMesh(world.buildShelfUnit());
         crate = new GpuMesh(world.buildCarryCrate());
-        body = new GpuMesh(characters.buildBody(true));
+        body = new GpuMesh(characters.buildBody());
+        apron = new GpuMesh(characters.buildApron());
         for (int i = 0; i < HAIR_STYLES; i++) {
             hair[i] = new GpuMesh(characters.buildHair(i));
         }
@@ -77,6 +79,7 @@ public final class SceneRenderer {
         shelfUnit.invalidate();
         crate.invalidate();
         body.invalidate();
+        apron.invalidate();
         for (int i = 0; i < hair.length; i++) hair[i].invalidate();
         for (int i = 0; i < shelfGoods.length; i++) shelfGoods[i].invalidate();
     }
@@ -103,16 +106,20 @@ public final class SceneRenderer {
         environment.sunY = 0.42f + daylight * 0.55f;
         environment.sunZ = 0.45f + (float) Math.sin(angle) * 0.28f;
 
-        environment.sunR = MathUtil.lerp(0.30f, 1.08f, daylight) + dusk * 0.28f;
-        environment.sunG = MathUtil.lerp(0.26f, 1.00f, daylight) + dusk * 0.10f;
-        environment.sunB = MathUtil.lerp(0.30f, 0.92f, daylight);
+        // The directional light has to dominate, because it is the only one that
+        // casts. Ambient and the ceiling lamps are unshadowed fill: raise them and a
+        // shadow stops being a shadow, which is what left the shop looking flat and
+        // washed out with nothing grounded to the floor.
+        environment.sunR = MathUtil.lerp(0.34f, 1.32f, daylight) + dusk * 0.30f;
+        environment.sunG = MathUtil.lerp(0.29f, 1.22f, daylight) + dusk * 0.11f;
+        environment.sunB = MathUtil.lerp(0.33f, 1.10f, daylight);
 
-        environment.skyR = MathUtil.lerp(0.10f, 0.40f, daylight);
-        environment.skyG = MathUtil.lerp(0.11f, 0.45f, daylight);
-        environment.skyB = MathUtil.lerp(0.16f, 0.54f, daylight);
-        environment.groundR = MathUtil.lerp(0.09f, 0.21f, daylight);
-        environment.groundG = MathUtil.lerp(0.08f, 0.20f, daylight);
-        environment.groundB = MathUtil.lerp(0.09f, 0.18f, daylight);
+        environment.skyR = MathUtil.lerp(0.070f, 0.200f, daylight);
+        environment.skyG = MathUtil.lerp(0.078f, 0.222f, daylight);
+        environment.skyB = MathUtil.lerp(0.110f, 0.262f, daylight);
+        environment.groundR = MathUtil.lerp(0.050f, 0.112f, daylight);
+        environment.groundG = MathUtil.lerp(0.046f, 0.104f, daylight);
+        environment.groundB = MathUtil.lerp(0.052f, 0.096f, daylight);
 
         environment.clearR = MathUtil.lerp(0.04f, 0.58f, daylight);
         environment.clearG = MathUtil.lerp(0.05f, 0.71f, daylight);
@@ -122,14 +129,14 @@ public final class SceneRenderer {
         environment.fogB = environment.clearB;
         environment.fogDensity = 0.0055f;
 
-        environment.shadowStrength = 0.30f + daylight * 0.60f;
-        environment.exposure = MathUtil.lerp(1.20f, 1.0f, daylight);
+        environment.shadowStrength = 0.55f + daylight * 0.42f;
+        environment.exposure = MathUtil.lerp(1.16f, 1.02f, daylight);
         environment.bloomThreshold = MathUtil.lerp(0.58f, 0.78f, daylight);
         environment.bloomIntensity = MathUtil.lerp(0.62f, 0.34f, daylight);
 
         // Ceiling fittings, warmer and stronger once the daylight drops.
         environment.clearPointLights();
-        float lampIntensity = MathUtil.lerp(0.95f, 0.42f, daylight);
+        float lampIntensity = MathUtil.lerp(0.82f, 0.17f, daylight);
         for (int i = 0; i < ShopLayout.LAMPS.length && i < 8; i++) {
             environment.addPointLight(ShopLayout.LAMPS[i][0],
                     ShopLayout.CEILING_HEIGHT - 0.20f, ShopLayout.LAMPS[i][1],
@@ -205,6 +212,9 @@ public final class SceneRenderer {
         renderer.submitSkinned(body, actor.boneMatrices, tints, true);
         int style = MathUtil.clamp(actor.appearance.hairStyle, 0, HAIR_STYLES - 1);
         renderer.submitSkinned(hair[style], actor.boneMatrices, tints, true);
+        if (actor.appearance.wearsApron) {
+            renderer.submitSkinned(apron, actor.boneMatrices, tints, true);
+        }
     }
 
     /** Places a carried crate between the character's hands. */
@@ -229,6 +239,7 @@ public final class SceneRenderer {
         shelfUnit.dispose();
         crate.dispose();
         body.dispose();
+        apron.dispose();
         for (int i = 0; i < hair.length; i++) hair[i].dispose();
         for (int i = 0; i < shelfGoods.length; i++) shelfGoods[i].dispose();
         built = false;

@@ -106,11 +106,16 @@ public final class Animator {
         yaw[Skeleton.CHEST] += drift * 0.030f * rest;
         skeleton.hipOffsetY += -Math.abs(sway) * 0.006f * rest;
 
-        // Arms hang a little away from the body rather than clipping into it.
-        roll[Skeleton.UPPERARM_L] += (-0.085f + sway * 0.012f) * rest;
-        roll[Skeleton.UPPERARM_R] += (0.085f - sway * 0.012f) * rest;
-        pitch[Skeleton.FOREARM_L] += -0.14f * rest;
-        pitch[Skeleton.FOREARM_R] += -0.14f * rest;
+        // Arms rest away from the body with a little elbow flex. Hanging them dead
+        // straight against the ribs is most of what makes an idle read as a plank.
+        roll[Skeleton.UPPERARM_L] += (-0.165f + sway * 0.016f) * rest;
+        roll[Skeleton.UPPERARM_R] += (0.165f - sway * 0.016f) * rest;
+        pitch[Skeleton.UPPERARM_L] += -0.06f * rest;
+        pitch[Skeleton.UPPERARM_R] += -0.06f * rest;
+        pitch[Skeleton.FOREARM_L] += -0.26f * rest;
+        pitch[Skeleton.FOREARM_R] += -0.26f * rest;
+        yaw[Skeleton.FOREARM_L] += -0.12f * rest;
+        yaw[Skeleton.FOREARM_R] += 0.12f * rest;
     }
 
     private void applyLocomotion(Skeleton skeleton) {

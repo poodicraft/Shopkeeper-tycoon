@@ -55,27 +55,34 @@ public final class Skeleton {
             THIGH_R, SHIN_R,
     };
 
-    /** Bind-pose head position of each bone, in model space. */
+    /**
+     * Bind-pose head position of each bone, in model space.
+     *
+     * <p>Laid out against adult proportions for a 1.78 m figure: hip joint at 53% of
+     * height, knee at 28%, shoulder at 82%, chin at 86%, crown at the top. Getting
+     * these wrong is what makes a character read as a mannequin however good the
+     * mesh over them is.
+     */
     public static final float[][] BIND = {
-            {0.000f, 0.980f, 0.000f},   // HIPS
-            {0.000f, 1.120f, 0.005f},   // SPINE
+            {0.000f, 0.960f, 0.000f},   // HIPS
+            {0.000f, 1.110f, 0.008f},   // SPINE
             {0.000f, 1.290f, 0.000f},   // CHEST
-            {0.000f, 1.500f, -0.010f},  // NECK
-            {0.000f, 1.585f, 0.000f},   // HEAD
-            {0.055f, 1.455f, 0.000f},   // SHOULDER_L
-            {0.183f, 1.440f, 0.000f},   // UPPERARM_L
-            {0.196f, 1.168f, 0.004f},   // FOREARM_L
-            {0.205f, 0.925f, 0.008f},   // HAND_L
-            {-0.055f, 1.455f, 0.000f},  // SHOULDER_R
-            {-0.183f, 1.440f, 0.000f},  // UPPERARM_R
-            {-0.196f, 1.168f, 0.004f},  // FOREARM_R
-            {-0.205f, 0.925f, 0.008f},  // HAND_R
-            {0.095f, 0.955f, 0.000f},   // THIGH_L
-            {0.100f, 0.530f, 0.004f},   // SHIN_L
-            {0.102f, 0.090f, 0.000f},   // FOOT_L
-            {-0.095f, 0.955f, 0.000f},  // THIGH_R
-            {-0.100f, 0.530f, 0.004f},  // SHIN_R
-            {-0.102f, 0.090f, 0.000f},  // FOOT_R
+            {0.000f, 1.500f, -0.012f},  // NECK
+            {0.000f, 1.585f, 0.000f},   // HEAD  (base of the skull, not its centre)
+            {0.058f, 1.462f, 0.000f},   // SHOULDER_L
+            {0.188f, 1.448f, 0.000f},   // UPPERARM_L
+            {0.200f, 1.180f, 0.006f},   // FOREARM_L
+            {0.210f, 0.930f, 0.010f},   // HAND_L
+            {-0.058f, 1.462f, 0.000f},  // SHOULDER_R
+            {-0.188f, 1.448f, 0.000f},  // UPPERARM_R
+            {-0.200f, 1.180f, 0.006f},  // FOREARM_R
+            {-0.210f, 0.930f, 0.010f},  // HAND_R
+            {0.098f, 0.935f, 0.000f},   // THIGH_L
+            {0.102f, 0.505f, 0.006f},   // SHIN_L
+            {0.104f, 0.075f, 0.000f},   // FOOT_L
+            {-0.098f, 0.935f, 0.000f},  // THIGH_R
+            {-0.102f, 0.505f, 0.006f},  // SHIN_R
+            {-0.104f, 0.075f, 0.000f},  // FOOT_R
     };
 
     /** Animated local rotation of each bone, relative to its bind orientation. */

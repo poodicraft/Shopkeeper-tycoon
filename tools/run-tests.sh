@@ -12,6 +12,13 @@
 #   shaders       every GLSL variant compiles as OpenGL ES 3.00
 #
 # None of this needs a device or an emulator.
+#
+# For looking at the character rather than asserting about it, tools/preview
+# renders the same meshes, skinning and textures to PNGs with a small software
+# rasteriser:
+#
+#   javac -cp <android.jar> -d build/preview @srcs tools/preview/Preview.java
+#   java  -cp build/preview:<android.jar> Preview build/preview
 
 set -euo pipefail
 

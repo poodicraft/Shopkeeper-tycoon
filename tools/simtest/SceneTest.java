@@ -25,7 +25,8 @@ public final class SceneTest {
         MeshData crate = world.buildCarryCrate();
 
         CharacterMesh characters = new CharacterMesh();
-        MeshData body = characters.buildBody(true);
+        MeshData body = characters.buildBody();
+        MeshData apron = characters.buildApron();
         MeshData[] hair = new MeshData[3];
         for (int i = 0; i < hair.length; i++) hair[i] = characters.buildHair(i);
 
