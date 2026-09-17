@@ -97,8 +97,8 @@ public final class Shaders {
             "uniform sampler2DArray uAlbedo;\n" +
             "uniform sampler2DArray uNormalMap;\n" +
             "uniform sampler2D uShadowMap;\n" +
-            "uniform vec4 uMaterialParams[32];\n" +
-            "uniform vec3 uMaterialTint[32];\n" +
+            "uniform vec4 uMaterialParams[34];\n" +
+            "uniform vec3 uMaterialTint[34];\n" +
             "uniform vec3 uSunDir;\n" +
             "uniform vec3 uSunColor;\n" +
             "uniform vec3 uSkyColor;\n" +

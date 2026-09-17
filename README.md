@@ -193,7 +193,19 @@ are generated as pixels at startup, each with a matching normal map derived from
 its own height field. A material is a *vertex attribute* indexing into that array,
 so the entire shop, mixing every surface it has, still draws in one call.
 
-**One mesh, many people.** Everyone in the shop shares a single 5,000-triangle
+**The face is painted, not modelled.** Brows, lash lines, lips, nostrils, the
+jawline and the ear are drawn into an equirectangular map of the head; only the
+skull, the jaw and the tip of the nose are geometry, and the eyes are almond-shaped
+patches carrying their own untinted layer. Modelling those features as bumps on the
+skull's radius — which is the obvious thing to do, and what this did first — gives a
+dozen overlapping smooth mounds shaded smoothly across all of them. That is a wax
+face, and no amount of adjusting the coefficients fixes it: a radius field cannot
+make an edge, and a face is mostly edges. The map spends 80% of its width on the
+face itself and compresses the back of the skull, which is plain skin, into the
+border: spread evenly over the whole head, the 15 mm gap between two eyebrows is
+seven texels wide and they blur into one bar.
+
+**One mesh, many people.** Everyone in the shop shares a single 4,500-triangle
 skinned body. They differ by bone matrices, height, and a per-draw colour table
 keyed on material — skin, hair, shirt, trousers and shoes are separate materials,
 so one table turns the same geometry into a different person.

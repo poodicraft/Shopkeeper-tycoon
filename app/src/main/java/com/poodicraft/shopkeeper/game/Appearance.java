@@ -85,6 +85,13 @@ public final class Appearance {
         set(Materials.DENIM, trousers);
         set(Materials.LEATHER, shoes);
         set(Materials.APRON, apron);
+        // The face map is skin, so it takes the skin tint. Its base is painted a
+        // little under white and the tint is scaled to match, which leaves the
+        // brows, lips and lash lines room to be darker than skin rather than
+        // darker than the texture.
+        set(Materials.FACE, skin);
+        // The eyes deliberately keep the default white: tinting them by skin is
+        // exactly the thing having a separate layer is there to avoid.
         tintsDirty = false;
         return tints;
     }

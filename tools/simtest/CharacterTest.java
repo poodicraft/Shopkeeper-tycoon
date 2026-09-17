@@ -1,3 +1,4 @@
+import com.poodicraft.shopkeeper.art.Materials;
 import com.poodicraft.shopkeeper.character.Animator;
 import com.poodicraft.shopkeeper.character.CharacterMesh;
 import com.poodicraft.shopkeeper.character.Skeleton;
@@ -101,6 +102,39 @@ public final class CharacterTest {
         }
         check(String.format("the nose is shaded as a nose, not as a sphere (%.0f deg off radial)",
                 steepest), steepest > 20f);
+
+        // The face is painted, so the head has to be on the face layer with UVs in
+        // range. Left tiling like the rest of the body, the map repeats several times
+        // across the skull and the character wears a grid of faces.
+        int headVertices = 0, outOfRangeV = 0;
+        for (int v = 0; v < body.vertexCount(); v++) {
+            if (body.get(v, 1) < 1.50f) continue;
+            if ((int) body.get(v, MeshData.OFFSET_MATERIAL) != Materials.FACE) continue;
+            headVertices++;
+            float w = body.get(v, MeshData.OFFSET_UV + 1);
+            if (w < -0.001f || w > 1.001f) outOfRangeV++;
+        }
+        check("the head is mapped onto the face layer (" + headVertices + " vertices)",
+                headVertices > 200);
+        check("the face map's v stays on the map (" + outOfRangeV + " outside)",
+                outOfRangeV == 0);
+
+        // u is allowed outside [0,1] — it runs continuously round the skull and wraps
+        // in the sampler — but no single triangle may span a large slice of it. One
+        // that does is the seam, and a seam triangle sweeps the whole face across
+        // itself in a smear.
+        float widest = 0f;
+        for (int i = 0; i < body.indexCount; i += 3) {
+            int a = body.indices[i], b = body.indices[i + 1], c = body.indices[i + 2];
+            if ((int) body.get(a, MeshData.OFFSET_MATERIAL) != Materials.FACE) continue;
+            float ua = body.get(a, MeshData.OFFSET_UV);
+            float ub = body.get(b, MeshData.OFFSET_UV);
+            float uc = body.get(c, MeshData.OFFSET_UV);
+            widest = Math.max(widest, Math.max(ua, Math.max(ub, uc))
+                    - Math.min(ua, Math.min(ub, uc)));
+        }
+        check(String.format("no face triangle straddles the seam (widest %.3f of the map)",
+                widest), widest < 0.25f);
     }
 
     /** Widest point across the back of the torso in a height band, arms excluded. */

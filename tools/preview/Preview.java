@@ -83,11 +83,11 @@ public final class Preview {
         }
 
         preview.silhouette = false;
-        preview.render(body, hair[0], shopkeeper, "idle", 0.25f, -0.06f, 2.70f, 1.62f, 0.62f);
+        preview.render(body, hair[0], shopkeeper, "idle", 0.20f, -0.02f, 3.20f, 1.655f, 0.42f);
         preview.save(outDir + "/character-head.png");
         sheet.add(outDir + "/character-head.png");
 
-        preview.render(body, hair[0], shopkeeper, "idle", 1.57f, -0.06f, 2.70f, 1.62f, 0.62f);
+        preview.render(body, hair[0], shopkeeper, "idle", 1.57f, -0.02f, 3.20f, 1.655f, 0.42f);
         preview.save(outDir + "/character-head-side.png");
         sheet.add(outDir + "/character-head-side.png");
 
@@ -155,6 +155,7 @@ public final class Preview {
         float[] sx = new float[count], sy = new float[count], sz = new float[count];
         float[] wz = new float[count];
         float[] nx = new float[count], ny = new float[count], nz = new float[count];
+        float[] tx = new float[count], ty = new float[count], tz = new float[count];
 
         for (int v = 0; v < count; v++) {
             tmpIn.set(mesh.get(v, 0), mesh.get(v, 1), mesh.get(v, 2));
@@ -162,6 +163,11 @@ public final class Preview {
             tmpIn.set(mesh.get(v, 3), mesh.get(v, 4), mesh.get(v, 5));
             skinDirection(mesh, v, skeleton, tmpIn, tmpB);
             nx[v] = tmpB.x; ny[v] = tmpB.y; nz[v] = tmpB.z;
+            tmpIn.set(mesh.get(v, MeshData.OFFSET_TANGENT),
+                    mesh.get(v, MeshData.OFFSET_TANGENT + 1),
+                    mesh.get(v, MeshData.OFFSET_TANGENT + 2));
+            skinDirection(mesh, v, skeleton, tmpIn, tmpB);
+            tx[v] = tmpB.x; ty[v] = tmpB.y; tz[v] = tmpB.z;
 
             float[] m = viewProjection.m;
             float cx = m[0] * tmpA.x + m[4] * tmpA.y + m[8] * tmpA.z + m[12];
@@ -177,7 +183,7 @@ public final class Preview {
 
         for (int i = 0; i < mesh.indexCount; i += 3) {
             int a = mesh.indices[i], b = mesh.indices[i + 1], c = mesh.indices[i + 2];
-            triangle(mesh, a, b, c, sx, sy, sz, wz, nx, ny, nz, tints);
+            triangle(mesh, a, b, c, sx, sy, sz, wz, nx, ny, nz, tx, ty, tz, tints);
         }
     }
 
@@ -205,7 +211,8 @@ public final class Preview {
 
     private void triangle(MeshData mesh, int a, int b, int c,
                           float[] sx, float[] sy, float[] sz, float[] wz,
-                          float[] nx, float[] ny, float[] nz, float[] tints) {
+                          float[] nx, float[] ny, float[] nz,
+                          float[] tx, float[] ty, float[] tz, float[] tints) {
         float x0 = sx[a], y0 = sy[a], x1 = sx[b], y1 = sy[b], x2 = sx[c], y2 = sy[c];
         float area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
         if (area >= -1e-6f) return; // back face, given the screen-space y flip
@@ -247,6 +254,35 @@ public final class Preview {
                 float len = (float) Math.sqrt(n0 * n0 + n1 * n1 + n2 * n2);
                 if (len > 1e-5f) { n0 /= len; n1 /= len; n2 /= len; }
 
+                // Apply the material's normal map, the way the fragment shader does.
+                // Without it, everything relief-mapped rather than modelled — which
+                // on the face is the brows, the lips and the nostrils — shows up
+                // here as flat paint and gets tuned against the wrong picture.
+                float strength = normalStrength(material);
+                if (strength > 0f) {
+                    float t0 = tx[a] * w0 + tx[b] * w1 + tx[c] * w2;
+                    float t1 = ty[a] * w0 + ty[b] * w1 + ty[c] * w2;
+                    float t2 = tz[a] * w0 + tz[b] * w1 + tz[c] * w2;
+                    float d = t0 * n0 + t1 * n1 + t2 * n2;
+                    t0 -= n0 * d; t1 -= n1 * d; t2 -= n2 * d;
+                    float tl = (float) Math.sqrt(t0 * t0 + t1 * t1 + t2 * t2);
+                    if (tl > 1e-5f) {
+                        t0 /= tl; t1 /= tl; t2 /= tl;
+                        float b0 = n1 * t2 - n2 * t1;
+                        float b1 = n2 * t0 - n0 * t2;
+                        float b2 = n0 * t1 - n1 * t0;
+                        int packed = sampleNormal(material, pu, pv);
+                        float mx = (((packed >> 16) & 0xFF) / 127.5f - 1f) * strength;
+                        float my = (((packed >> 8) & 0xFF) / 127.5f - 1f) * strength;
+                        float mz = (packed & 0xFF) / 127.5f - 1f;
+                        float bx = t0 * mx + b0 * my + n0 * mz;
+                        float by = t1 * mx + b1 * my + n1 * mz;
+                        float bz = t2 * mx + b2 * my + n2 * mz;
+                        float bl = (float) Math.sqrt(bx * bx + by * by + bz * bz);
+                        if (bl > 1e-5f) { n0 = bx / bl; n1 = by / bl; n2 = bz / bl; }
+                    }
+                }
+
                 int texel = sample(material, pu, pv);
                 float tr = ((texel >> 16) & 0xFF) / 255f;
                 float tg = ((texel >> 8) & 0xFF) / 255f;
@@ -259,10 +295,17 @@ public final class Preview {
                 tg *= vg * tints[material * 3 + 1];
                 tb *= vb * tints[material * 3 + 2];
 
-                // Key light from the front-left with a soft fill, to show form.
+                // Key light from the front-left with a soft fill, to show form, and
+                // the mesh's own ambient occlusion on the fill. The creases the
+                // occlusion carries - under a jaw, inside a sleeve - are a real part
+                // of how the character reads, and without them this picture flatters
+                // the model in exactly the places it should not.
+                float ao = mesh.get(a, MeshData.OFFSET_AO) * w0
+                        + mesh.get(b, MeshData.OFFSET_AO) * w1
+                        + mesh.get(c, MeshData.OFFSET_AO) * w2;
                 float key = Math.max(0f, n0 * -0.45f + n1 * 0.55f + n2 * 0.70f);
-                float fill = 0.30f + 0.22f * (n1 * 0.5f + 0.5f);
-                float light = 0.15f + key * 0.95f + fill;
+                float fill = (0.30f + 0.22f * (n1 * 0.5f + 0.5f)) * ao;
+                float light = 0.15f * ao + key * 0.95f + fill;
 
                 if (silhouette) {
                     pixels[index] = 0xFF1B1F26;
@@ -274,6 +317,25 @@ public final class Preview {
                         | clamp(tb * light);
             }
         }
+    }
+
+    /** Per-material normal-map strength, matching Materials.shadingParams. */
+    private float normalStrength(int material) {
+        float[] params = Materials.shadingParams();
+        return material >= 0 && material * 4 + 2 < params.length ? params[material * 4 + 2] : 0f;
+    }
+
+    /** Samples a normal-map layer with wrapping. */
+    private int sampleNormal(int material, float u, float v) {
+        int[] layer = material >= 0 && material < textures.normal.length
+                ? textures.normal[material] : null;
+        if (layer == null) return 0x00807FFF;
+        int size = TextureFactory.SIZE;
+        int x = (int) Math.floor(u * size) % size;
+        int y = (int) Math.floor(v * size) % size;
+        if (x < 0) x += size;
+        if (y < 0) y += size;
+        return layer[y * size + x];
     }
 
     /** Samples an albedo layer with wrapping, the way the GPU will. */

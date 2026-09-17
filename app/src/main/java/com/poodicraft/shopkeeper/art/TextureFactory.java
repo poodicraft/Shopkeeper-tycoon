@@ -142,9 +142,237 @@ public final class TextureFactory {
             case Materials.CARPET:        carpet(u, v, out); break;
             case Materials.CERAMIC:       ceramic(u, v, out); break;
             case Materials.EMISSIVE:      emissive(u, v, out); break;
+            case Materials.FACE:          face(u, v, out); break;
+            case Materials.EYE:           eye(u, v, out); break;
             default:                      labelBase(u, v, out); break;
         }
     }
+
+    // ------------------------------------------------------------------- face
+
+    /**
+     * The face, painted as an equirectangular map of the whole head.
+     *
+     * <p>{@code u} runs right round the skull with the nose at 0.5 and the seam at
+     * the back; {@code v} runs from the crown at 0 to under the chin at 1. Everything
+     * off the face is plain skin, so the head can be one material with no seam
+     * anywhere on it.
+     *
+     * <p>The colours here are <em>ratios</em>, not absolutes: the layer is tinted by
+     * the character's skin, so 1.0 means "skin" and 0.3 means "a dark line on skin".
+     * That is why the eyes are not here — a white painted into this map comes out the
+     * colour of the face around it, and there is no skin tone this works for.
+     */
+    private void face(float u, float v, float[] out) {
+        float du = u - 0.5f;
+        if (du > 0.5f) du -= 1f;
+        if (du < -0.5f) du += 1f;
+        float side = Math.abs(du);
+
+        // Skin underneath everything. The noise is sampled through the inverse of
+        // the face mapping, so pores stay the same size per centimetre of skin: read
+        // straight off u and v they stretch 3:1 across the compressed band and the
+        // side of the head comes out visibly streaked.
+        float un = side <= 0.40f ? side / 2.3529f : 0.17f + (side - 0.40f) / 0.30303f;
+        float vn = (v - 0.5f) / 1.60f + 0.615f;
+        float pores = noise.cellular(un * 220f, vn * 150f, 220);
+        float mottle = noise.fbm(un * 30f, vn * 19f, 30, 4, 0.5f);
+        float tone = 0.95f + mottle * 0.06f - (1f - smoothstep(0f, 0.35f, pores)) * 0.05f;
+        float r = tone, g = tone * 0.985f, b = tone * 0.970f;
+        float height = 0.5f + pores * 0.04f;
+
+        // Warmth across the cheeks.
+        float cheek = bump(side, 0.250f, 0.130f) * bump(v, 0.420f, 0.128f);
+        r += cheek * 0.030f; g -= cheek * 0.014f; b -= cheek * 0.020f;
+
+        // Landmarks are real head measurements carried through CharacterMesh.faceU
+        // and faceV: pupils 31.5 mm out from the centreline and level with the middle
+        // of the head, brow ends at 7.4 and 52.5 mm, nostrils at 9.5, mouth corners
+        // at 25, jaw and hairline where an adult skull actually puts them.
+        final float eyeU = 0.1537f, eyeV = 0.3058f;
+
+        for (int s = -1; s <= 1; s += 2) {
+            float ex = (du - s * eyeU) * s;   // outward-positive across the eye
+            float ey = v - eyeV;
+
+            // Socket: a soft hollow the eye sits in.
+            float socket = bump(ex, 0f, 0.118f) * bump(ey, -0.0064f, 0.064f);
+            float shade = socket * 0.13f;
+            r -= shade; g -= shade * 0.95f; b -= shade * 0.86f;
+            height -= socket * 0.10f;
+
+            // Upper lash line, hugging the top of the eye and heavier at the outer end.
+            float lashY = -0.0420f - ex * 0.0374f + ex * ex * 0.751f;
+            float lash = bump(ey - lashY, 0f, 0.0150f + Math.max(0f, ex) * 0.0045f)
+                    * window(ex, -0.0880f, 0.1010f, 0.0250f);
+            float lashInk = lash * 0.82f;
+            r *= 1f - lashInk; g *= 1f - lashInk * 0.98f; b *= 1f - lashInk * 0.94f;
+            height -= lash * 0.06f;
+
+            // Lower lid, and the crease above the eye.
+            float lidY = 0.0400f - ex * 0.0136f + ex * ex * 0.462f;
+            float lid = bump(ey - lidY, 0f, 0.0095f) * window(ex, -0.0800f, 0.0860f, 0.0300f);
+            r -= lid * 0.16f; g -= lid * 0.16f; b -= lid * 0.14f;
+            float crease = bump(ey - (lashY - 0.0336f), 0f, 0.012f)
+                    * window(ex, -0.0659f, 0.0706f, 0.0329f);
+            r -= crease * 0.09f; g -= crease * 0.09f; b -= crease * 0.08f;
+            height += crease * 0.05f;
+
+            // Brow: an arc rising from the inner end and falling away outboard. Its
+            // inner feather has to be narrower than the gap between the two brows, or
+            // they blur into a single bar straight across the face.
+            float browY = 0.1180f - 0.0170f * smoothstep(-0.040f, 0.090f, ex)
+                    + 0.0330f * smoothstep(0.100f, 0.190f, ex);
+            float brow = bump(v - browY, 0f, 0.0230f - Math.max(0f, ex) * 0.0260f)
+                    * window(ex, -0.0988f, 0.1600f, 0.0200f);
+            float browInk = brow * 0.88f;
+            r *= 1f - browInk; g *= 1f - browInk * 0.99f; b *= 1f - browInk * 0.97f;
+            height += brow * 0.10f;
+        }
+
+        // Ear. It has to sit inside the map's linear region, below u = 0.40: past
+        // that the mapping squeezes the back of the head into a tenth of the texture,
+        // and anything painted there gets smeared right across the side of the skull.
+        // Everything out in that band is plain skin, which stretches invisibly.
+        float earX = (side - 0.3850f) * 3.0f, earY = v - 0.399f;
+        float earOval = 1f - smoothstep(0.085f, 0.135f,
+                (float) Math.sqrt(earX * earX + earY * earY));
+        r -= earOval * 0.070f; g -= earOval * 0.070f; b -= earOval * 0.062f;
+        float earRim = earOval * smoothstep(-0.020f, 0.040f, side - 0.3850f);
+        r += earRim * 0.055f; g += earRim * 0.052f; b += earRim * 0.046f;
+        height += earRim * 0.16f - earOval * 0.06f;
+
+        // Nose. The crease sits at the edge of the nose's own form, 18.5 mm out, and
+        // does not start until the eye line; any higher or any closer in and it draws
+        // a line down the bridge, which reads as a blade rather than a nose.
+        float noseDown = smoothstep(0.316f, 0.540f, v);
+        float flankAt = 0.0882f + noseDown * 0.0141f;
+        float flank = bump(side, flankAt, 0.0176f + noseDown * 0.0118f)
+                * window(v, 0.316f, 0.564f, 0.072f);
+        r -= flank * 0.055f; g -= flank * 0.059f; b -= flank * 0.059f;
+        height -= flank * 0.05f;
+
+        float nostril = bump(side, 0.0452f, 0.0207f) * bump(v, 0.5528f, 0.0176f);
+        float ink = nostril * 0.82f;
+        r *= 1f - ink; g *= 1f - ink * 0.96f; b *= 1f - ink * 0.92f;
+        height -= nostril * 0.30f;
+
+        float underNose = bump(v, 0.5848f, 0.024f) * window(du, -0.0706f, 0.0706f, 0.0329f);
+        r -= underNose * 0.070f; g -= underNose * 0.068f; b -= underNose * 0.060f;
+
+        float philtrum = bump(du, 0f, 0.0165f) * window(v, 0.5848f, 0.6808f, 0.016f);
+        height -= philtrum * 0.08f;
+
+        // Lips. The upper is darker and dips at the centre into a cupid's bow; the
+        // lower is fuller and catches light along the middle.
+        float bow = 0.692f + bump(du, 0f, 0.0306f) * 0.0056f;
+        float lipHalf = 0.1205f;
+        float across = window(du, -lipHalf, lipHalf, 0.0376f);
+        float upper = window(v, bow - 0.0312f, bow, 0.008f) * across;
+        float lower = window(v, bow, bow + 0.0424f, 0.0096f) * across;
+        float lip = Math.max(upper, lower);
+        r = mix(r, r * 1.00f, lip);
+        g = mix(g, g * 0.62f, lip);
+        b = mix(b, b * 0.60f, lip);
+        r += lower * 0.030f; g += lower * 0.010f; b += lower * 0.008f;
+        height += upper * 0.10f + lower * 0.16f;
+
+        float seam = bump(v - bow, 0f, 0.0067f) * across;
+        float seamInk = seam * 0.62f;
+        r *= 1f - seamInk; g *= 1f - seamInk * 0.92f; b *= 1f - seamInk * 0.90f;
+        height -= seam * 0.22f;
+
+        float under = bump(v - (bow + 0.048f), 0f, 0.0176f)
+                * window(du, -0.0847f, 0.0847f, 0.0424f);
+        r -= under * 0.055f; g -= under * 0.052f; b -= under * 0.046f;
+        float corner = bump(side, lipHalf, 0.0259f) * bump(v - bow, 0.0016f, 0.0176f);
+        r -= corner * 0.090f; g -= corner * 0.085f; b -= corner * 0.075f;
+
+        // The jawline runs as a curve from the chin up and back to under the ear. A
+        // straight band across the bottom of the face, which is the obvious thing to
+        // paint, is a shadow under the chin and not a jaw at all.
+        float jawV = 0.8952f - 0.968f * du * du;
+        float below = bump(v - jawV, 0.0448f, 0.0544f) * window(side, 0f, 0.335f, 0.100f);
+        float above = bump(v - jawV, -0.0416f, 0.0448f) * window(side, 0f, 0.318f, 0.100f);
+        r -= below * 0.105f; g -= below * 0.102f; b -= below * 0.092f;
+        r += above * 0.022f; g += above * 0.020f; b += above * 0.017f;
+        height += above * 0.07f - below * 0.09f;
+
+        // A hollow under the cheekbone, which is what gives a face a cheek at all.
+        float hollow = bump(side, 0.266f, 0.089f) * bump(v, 0.572f, 0.104f);
+        r -= hollow * 0.052f; g -= hollow * 0.052f; b -= hollow * 0.047f;
+        height -= hollow * 0.05f;
+
+        out[0] = clamp01(r);
+        out[1] = clamp01(g);
+        out[2] = clamp01(b);
+        out[3] = clamp01(height);
+    }
+
+    /**
+     * The eye, filling its own layer: the almond of geometry on the face is mapped
+     * straight onto this, so the patch's outline is the eye's outline.
+     *
+     * <p>Untinted, which is the whole reason it is not part of {@link #face}.
+     */
+    private void eye(float u, float v, float[] out) {
+        // Sclera, shaded towards the top where the lid sits over it, and warmed
+        // towards the corners where it meets skin.
+        float shade = 1f - smoothstep(0.30f, 0.0f, v) * 0.34f;
+        float corner = smoothstep(0.34f, 0.0f, Math.min(u, 1f - u));
+        float r = (0.965f * shade) - corner * 0.10f;
+        float g = (0.945f * shade) - corner * 0.14f;
+        float b = (0.930f * shade) - corner * 0.15f;
+        float height = 0.55f;
+
+        // Iris, a touch below centre so the eye is not staring.
+        float ix = (u - 0.5f) * 1.85f, iy = v - 0.54f;
+        float radial = (float) Math.sqrt(ix * ix + iy * iy);
+        float iris = 1f - smoothstep(0.300f, 0.318f, radial);
+        if (iris > 0f) {
+            // Fibres running out from the pupil, and a darker limbal ring at the rim.
+            float angle = (float) Math.atan2(iy, ix);
+            float fibre = noise.value(angle * 9f, radial * 7f, 64);
+            float tone = 0.52f + fibre * 0.22f - smoothstep(0.16f, 0.30f, radial) * 0.26f;
+            r = mix(r, tone * 0.62f, iris);
+            g = mix(g, tone * 0.78f, iris);
+            b = mix(b, tone * 0.92f, iris);
+            height = mix(height, 0.72f, iris);
+        }
+        float pupil = 1f - smoothstep(0.118f, 0.132f, radial);
+        r = mix(r, 0.045f, pupil);
+        g = mix(g, 0.045f, pupil);
+        b = mix(b, 0.055f, pupil);
+
+        // Catchlight. One small bright spot is most of what stops an eye looking dead.
+        float cx = (u - 0.415f) * 1.85f, cy = v - 0.415f;
+        float spark = 1f - smoothstep(0.052f, 0.070f, (float) Math.sqrt(cx * cx + cy * cy));
+        r = mix(r, 1f, spark); g = mix(g, 1f, spark); b = mix(b, 1f, spark);
+
+        // Lash shadow along the very top, and the dark rim all the way round.
+        float rim = smoothstep(0.46f, 0.54f, Math.abs(v - 0.5f) * 1.6f
+                + Math.abs(u - 0.5f) * 1.1f);
+        r = mix(r, 0.16f, rim); g = mix(g, 0.16f, rim); b = mix(b, 0.17f, rim);
+
+        out[0] = clamp01(r);
+        out[1] = clamp01(g);
+        out[2] = clamp01(b);
+        out[3] = clamp01(height);
+    }
+
+    /** 1 at {@code centre}, falling to 0 at {@code width} either side. */
+    private static float bump(float x, float centre, float width) {
+        float d = Math.abs(x - centre) / Math.max(1e-6f, width);
+        return d >= 1f ? 0f : 1f - smoothstep(0f, 1f, d);
+    }
+
+    /** 1 between {@code low} and {@code high}, feathered by {@code soft}. */
+    private static float window(float x, float low, float high, float soft) {
+        return smoothstep(low - soft, low + soft, x)
+                * (1f - smoothstep(high - soft, high + soft, x));
+    }
+
+    private static float clamp01(float x) { return x < 0f ? 0f : (x > 1f ? 1f : x); }
 
     private void floorTile(float u, float v, float[] out) {
         final float tiles = 2f;

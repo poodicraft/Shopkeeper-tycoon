@@ -42,8 +42,23 @@ public final class Materials {
     /** Printed packaging: one layer per product tier, painted with real text. */
     public static final int LABEL_BASE    = 28;
     public static final int LABEL_COUNT   = 4;
+    /**
+     * The face, as a painted equirectangular map of the whole head.
+     *
+     * <p>Brows, lash lines, lips, nostrils and the ear are drawn here rather than
+     * built as geometry. Every one of them modelled as a bump on the skull's radius
+     * came out as a smooth mound with smooth normals across it, and a dozen of those
+     * overlapping is a wax face. Paint has edges; a radius field does not.
+     */
+    public static final int FACE          = 32;
+    /**
+     * The eye: sclera, iris, pupil and catchlight, on its own layer because it is the
+     * one part of a face that must <em>not</em> take the skin tint. A white painted
+     * into the face map comes out the colour of the skin around it.
+     */
+    public static final int EYE           = 33;
 
-    public static final int COUNT = 32;
+    public static final int COUNT = 34;
 
     /**
      * Per-material shading: specular strength, shininess, normal-map strength and
@@ -58,10 +73,13 @@ public final class Materials {
         set(p, METAL_BRUSHED, 0.62f,  70f, 0.55f, 0f);
         set(p, METAL_DARK,    0.45f,  54f, 0.55f, 0f);
         set(p, SKIN,          0.12f,  22f, 0.35f, 0f);
-        set(p, HAIR,          0.28f,  36f, 0.70f, 0f);
-        set(p, SHIRT,         0.07f,  14f, 0.95f, 0f);
-        set(p, DENIM,         0.06f,  12f, 1.00f, 0f);
-        set(p, APRON,         0.08f,  16f, 0.90f, 0f);
+        set(p, HAIR,          0.28f,  36f, 0.45f, 0f);
+        // Cloth normal strengths are deliberately low. A weave's height field has a
+        // lot of contrast in it, and pushed hard the shirt stops reading as shirting
+        // and starts reading as coarse knitwear moulded onto the body.
+        set(p, SHIRT,         0.07f,  14f, 0.24f, 0f);
+        set(p, DENIM,         0.06f,  12f, 0.28f, 0f);
+        set(p, APRON,         0.08f,  16f, 0.26f, 0f);
         set(p, LEATHER,       0.24f,  30f, 0.85f, 0f);
         set(p, CARDBOARD,     0.05f,  10f, 0.70f, 0f);
         set(p, PLASTIC,       0.42f,  58f, 0.30f, 0f);
@@ -78,6 +96,10 @@ public final class Materials {
         set(p, BRICK,         0.08f,  14f, 0.95f, 0f);
         set(p, CARPET,        0.04f,   8f, 0.90f, 0f);
         set(p, CERAMIC,       0.55f,  90f, 0.25f, 0f);
+        // The face leans hard on its normal map: the relief of a lip or a nostril is
+        // in the height field, so painted features still catch the light.
+        set(p, FACE,          0.13f,  24f, 1.00f, 0f);
+        set(p, EYE,           0.60f, 110f, 0.30f, 0f);
         set(p, EMISSIVE,      0.20f,  30f, 0.20f, 1f);
         for (int i = 0; i < LABEL_COUNT; i++) {
             set(p, LABEL_BASE + i, 0.26f, 40f, 0.30f, 0f);

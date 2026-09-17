@@ -44,14 +44,14 @@ public final class CharacterMesh {
     // The head carries more resolution than anything else, because it has to: the
     // nose is only about a fifth of the head wide, so at sixteen segments a single
     // column of vertices lands on it and no amount of shaping can make it a nose.
-    private static final int HEAD_SEGMENTS = 26;
-    private static final int HEAD_RINGS = 18;
+    private static final int HEAD_SEGMENTS = 28;
+    private static final int HEAD_RINGS = 20;
 
     /** Texture repeats per metre, chosen so each material's detail reads at arm's length. */
     private static final float UV_SKIN = 3.0f;
-    private static final float UV_FABRIC = 7.0f;
-    private static final float UV_DENIM = 7.0f;
-    private static final float UV_APRON = 6.0f;
+    private static final float UV_FABRIC = 9.0f;
+    private static final float UV_DENIM = 8.5f;
+    private static final float UV_APRON = 7.5f;
     private static final float UV_HAIR = 4.0f;
     private static final float UV_LEATHER = 5.0f;
 
@@ -59,17 +59,21 @@ public final class CharacterMesh {
     private static final float SHIRT = 0.012f;
 
     /**
-     * Head half-extents: 0.162 m across, 0.236 m tall, 0.198 m deep.
+     * Head half-extents: 0.158 m across, 0.230 m tall, 0.196 m deep — an adult head
+     * measures 150 by 232 by 195. Widening it beyond that does not make the face
+     * bigger, it makes the features smaller: eyes, nose and mouth are fixed sizes
+     * that do not grow with the skull, so a head 25 mm too wide reads as a broad
+     * blank face with a small cluster of features marooned in the middle of it.
      *
      * <p>Seven and a half of these stack into the 1.78 m figure, which is what an
      * adult actually measures. Eight — the figure-drawing convention — makes the head
      * half a head smaller, and at this distance that reads as a pinhead, not heroic.
      */
-    private static final float HEAD_WIDTH = 0.081f;
-    private static final float HEAD_HEIGHT = 0.118f;
-    private static final float HEAD_DEPTH = 0.099f;
+    private static final float HEAD_WIDTH = 0.079f;
+    private static final float HEAD_HEIGHT = 0.109f;
+    private static final float HEAD_DEPTH = 0.098f;
     /** The HEAD bone pivots at the ear canal; the skull's centre is a little above it. */
-    private static final float HEAD_RISE = 0.052f;
+    private static final float HEAD_RISE = 0.060f;
 
     private final GeometryBuilder b = new GeometryBuilder();
 
@@ -289,7 +293,7 @@ public final class CharacterMesh {
         float cz = Skeleton.bindZ(Skeleton.HEAD);
 
         int segments = 26, rings = 16;
-        float lift = style == 2 ? 0.0105f : 0.0195f;   // metres of hair thickness
+        float lift = style == 2 ? 0.0125f : 0.0265f;   // metres of hair thickness
         int[][] grid = new int[rings + 1][segments + 1];
         float[] normal = new float[3];
         float[] point = new float[3];
@@ -313,8 +317,9 @@ public final class CharacterMesh {
                 // up off the forehead so the hair has some volume to it.
                 float edge = SkinBinders.smoothstep(limit, limit + 0.42f, ny);
                 float thickness = lift * (0.03f + 0.97f * edge)
-                        + Math.max(0f, nz) * 0.0012f * edge
-                        + Math.max(0f, ny) * 0.0009f * edge;
+                        + Math.max(0f, nz) * 0.0030f * edge
+                        + Math.max(0f, ny) * 0.0055f * edge
+                        + Math.abs(nx) * 0.0030f * edge;
                 // Offset along the head's own normal, off the head's own surface, so
                 // the cap cannot drift away from the skull where the skull is not a
                 // plain ellipsoid.
@@ -362,11 +367,14 @@ public final class CharacterMesh {
     /**
      * Radius multiplier that turns a sphere into a head.
      *
-     * <p>The nose, the lips and the chin are shaped <em>into this surface</em> rather
-     * than stuck onto it afterwards. A nose assembled from three ellipsoids reads as
-     * a clown nose however carefully the three are placed, because nothing joins it
-     * to the brow above it; grown out of the skull it has a bridge, and the bridge is
-     * what makes it a face.
+     * <p>Deliberately short. An earlier version modelled the brow ridge, the eye
+     * sockets, the cheekbones, the lips and the ears into this function as well, and
+     * the result was a wax face: a dozen overlapping smooth mounds, shaded smoothly
+     * across all of them, with no edge anywhere. A radius field cannot make an edge.
+     * Everything that needs one — the eyes, the brows, the lips, the nostrils, the
+     * ear — is painted in {@link com.poodicraft.shopkeeper.art.Materials#FACE}
+     * instead, and what is left here is the handful of forms that really are large,
+     * smooth changes of shape.
      */
     private static float headRadius(float nx, float ny, float nz) {
         float r = 1f;
@@ -374,74 +382,37 @@ public final class CharacterMesh {
         float down = Math.max(0f, -ny);
         float side = Math.abs(nx);
 
-        // Cranium. The back of the skull is flatter than a sphere and the temples
-        // pull in above the ears, but the crown stays domed: pinch it and the head
-        // becomes an egg, which is what a silhouette gives away first.
-        r -= Math.max(0f, -nz) * 0.030f;
-        // Flatten the very top. An ellipsoid taller than it is wide comes to a point
-        // at the crown, and with hair on it the silhouette turns into a bullet.
-        r -= SkinBinders.smoothstep(0.60f, 1.0f, ny) * 0.050f;
-        r -= SkinBinders.smoothstep(0.16f, 0.50f, ny)
-                * (1f - SkinBinders.smoothstep(0.60f, 0.95f, ny)) * side * 0.052f;
+        // The back of the skull is flatter than a sphere, and the crown is a dome
+        // rather than the point an ellipsoid comes to.
+        r -= Math.max(0f, -nz) * 0.048f;
+        r -= SkinBinders.smoothstep(0.55f, 1.0f, ny) * 0.048f;
 
-        // Jaw: narrowing under the cheekbones, square at the angle below the ear,
-        // ending in a chin rather than in the small end of an egg.
-        // Narrow the jaw across, barely at all down. Because r scales all three
-        // axes at once, a jaw taper written as a plain radius cut also shortens the
-        // chin, and the lower half of the face ends up too small for the features
-        // that have to fit in it.
-        float jaw = SkinBinders.smoothstep(0.12f, 0.88f, down);
-        r -= jaw * 0.055f * (1f - front * 0.42f);
-        r -= jaw * side * side * 0.145f;
-        float jawCorner = SkinBinders.smoothstep(0.14f, 0.50f, down)
-                * (1f - SkinBinders.smoothstep(0.50f, 0.82f, down))
-                * SkinBinders.smoothstep(0.26f, 0.70f, side);
-        r += jawCorner * 0.055f;
-        float chin = SkinBinders.smoothstep(0.66f, 0.86f, down)
-                * (1f - SkinBinders.smoothstep(0.96f, 1.05f, down))
-                * (1f - SkinBinders.smoothstep(0.16f, 0.42f, side));
-        r += chin * front * 0.085f;
+        // Jaw: narrowing across, barely at all down. Because r scales all three axes
+        // at once, a jaw taper written as a plain radius cut also shortens the chin,
+        // and the lower half of the face ends up too small for a face to fit in.
+        float jaw = SkinBinders.smoothstep(0.10f, 0.85f, down);
+        r -= jaw * 0.045f;
+        r -= jaw * side * side * 0.105f;
+        float chin = SkinBinders.smoothstep(0.62f, 0.86f, down)
+                * (1f - SkinBinders.smoothstep(0.94f, 1.04f, down))
+                * (1f - SkinBinders.smoothstep(0.18f, 0.44f, side));
+        r += chin * front * 0.055f;
 
-        // Brow ridge, eye sockets set back under it, and cheekbones.
-        float brow = SkinBinders.smoothstep(0.10f, 0.30f, ny)
-                * (1f - SkinBinders.smoothstep(0.30f, 0.62f, ny));
-        r += brow * front * 0.048f;
-        float socket = SkinBinders.smoothstep(-0.16f, 0.02f, ny)
-                * (1f - SkinBinders.smoothstep(0.02f, 0.22f, ny))
-                * SkinBinders.smoothstep(0.16f, 0.50f, side)
-                * (1f - SkinBinders.smoothstep(0.58f, 0.92f, side));
-        r -= socket * front * 0.055f;
-        r += SkinBinders.smoothstep(0.04f, 0.34f, down)
-                * (1f - SkinBinders.smoothstep(0.34f, 0.72f, down))
-                * side * front * 0.085f;
-
-        // Nose: a bridge from between the brows that swells to a tip and stops.
-        float faceFront = SkinBinders.smoothstep(0.50f, 0.86f, front);
-        // Runs from the nasion, just under the brow, down to the base of the nose;
-        // narrow along the bridge and flaring into wings at the tip.
-        float noseSpan = SkinBinders.smoothstep(-0.60f, -0.50f, ny)
-                * (1f - SkinBinders.smoothstep(0.02f, 0.20f, ny));
-        float tipness = 1f - SkinBinders.smoothstep(-0.46f, -0.05f, ny);
-        float noseHalf = 0.13f + tipness * 0.20f;
-        float noseWidth = 1f - SkinBinders.smoothstep(noseHalf, noseHalf + 0.13f, side);
-        r += noseSpan * faceFront * noseWidth * (0.045f + 0.140f * tipness);
-
-        // Ear: a raised patch on the side of the skull, its top level with the eyes
-        // and its lobe with the base of the nose. As separate geometry it is a smooth
-        // blob stuck on the head — worse than nothing at the distance this is seen
-        // from, and it costs triangles to be worse.
-        float earBand = SkinBinders.smoothstep(-0.46f, -0.24f, ny)
-                * (1f - SkinBinders.smoothstep(-0.06f, 0.16f, ny))
-                * SkinBinders.smoothstep(-0.48f, -0.26f, nz)
-                * (1f - SkinBinders.smoothstep(-0.12f, 0.10f, nz));
-        r += earBand * SkinBinders.smoothstep(0.62f, 0.86f, side) * 0.038f;
-
-        // Lips, as a swell of the surface. The tinted patches on top of them are
-        // only colour; the shape has to be here or they sit on the face like paint.
-        float lips = SkinBinders.smoothstep(-0.80f, -0.70f, ny)
-                * (1f - SkinBinders.smoothstep(-0.56f, -0.44f, ny))
-                * (1f - SkinBinders.smoothstep(0.20f, 0.46f, side));
-        r += lips * faceFront * 0.030f;
+        // The nose keeps some geometry, because a profile is a silhouette and paint
+        // has none — but only the tip does. Carrying the raised form all the way up
+        // between the brows puts a narrow ridge down the middle of the face, and
+        // however carefully it is shaded, what that reads as from the front is a
+        // blade. The bridge is painted instead; only its lowest, broadest swell is
+        // modelled, and the tip is a rounded ball rather than the point of a wedge.
+        float faceFront = SkinBinders.smoothstep(0.55f, 0.88f, front);
+        float tip = SkinBinders.smoothstep(-0.52f, -0.44f, ny)
+                * (1f - SkinBinders.smoothstep(-0.30f, -0.16f, ny));
+        r += tip * faceFront * (1f - SkinBinders.smoothstep(0.150f, 0.255f, side)) * 0.124f;
+        // A broad, very low bridge carrying it up to the brow. Low and wide is the
+        // whole point: 2 mm over 35 mm of width is a form, 2 mm over 8 mm is an edge.
+        float bridge = SkinBinders.smoothstep(-0.40f, -0.28f, ny)
+                * (1f - SkinBinders.smoothstep(0.06f, 0.26f, ny));
+        r += bridge * faceFront * (1f - SkinBinders.smoothstep(0.200f, 0.330f, side)) * 0.030f;
 
         return r;
     }
@@ -461,9 +432,12 @@ public final class CharacterMesh {
         float front = Math.max(0f, hz);
         float back = Math.max(0f, -hz);
         float side = Math.abs(hx);
-        float limit = 0.14f + 0.36f * front - 0.50f * back;
+        float limit = 0.20f + 0.485f * front - 0.52f * back;
         limit += 0.14f * front * side;
         limit -= 0.05f * SkinBinders.smoothstep(0.86f, 1f, front);
+        // A parting: on one side of the crown the hair starts higher and the fringe
+        // sweeps across, which is most of what stops short hair reading as a cap.
+        limit += 0.085f * Math.max(0f, hx) * Math.max(0f, hz);
         // A little scallop, so the edge is a hairline rather than a drawn line. The
         // frequency has to be well above the mesh's, or it becomes one long diagonal
         // sweep instead of an irregularity.
@@ -492,7 +466,7 @@ public final class CharacterMesh {
         float front = Math.max(0f, dz);
         float shear = SkinBinders.smoothstep(0.10f, 0.95f, down) * 0.022f;
         float drop = SkinBinders.smoothstep(0.30f, 0.95f, down)
-                * SkinBinders.smoothstep(0.10f, 0.60f, front) * 0.011f;
+                * SkinBinders.smoothstep(0.10f, 0.60f, front) * 0.008f;
         out[0] = dx * r * HEAD_WIDTH;
         out[1] = dy * r * HEAD_HEIGHT - drop;
         out[2] = dz * r * HEAD_DEPTH + shear;
@@ -901,18 +875,20 @@ public final class CharacterMesh {
                 0f, 1.520f, -0.008f,
                 0f, 1.572f, -0.002f,
         };
+        // A real neck is 115 mm across, only a little narrower than the jaw above
+        // it. Tapered to a stalk it reads as a stem with a head balanced on it.
         b.tube(neck,
-                new float[]{0.060f, 0.053f, 0.045f, 0.041f},
-                new float[]{0.068f, 0.060f, 0.050f, 0.045f},
+                new float[]{0.062f, 0.058f, 0.054f, 0.052f},
+                new float[]{0.070f, 0.066f, 0.061f, 0.058f},
                 14, false);
 
         // Open collar, flaring away from the neck.
         b.skin(new SkinBinders.Rigid(Skeleton.CHEST));
         b.mat(Materials.SHIRT).occlusion(0.86f).uv(UV_FABRIC);
         float[] collar = {
-                0f, 1.424f, -0.020f,
-                0f, 1.452f, -0.016f,
-                0f, 1.480f, -0.010f,
+                0f, 1.438f, -0.020f,
+                0f, 1.470f, -0.016f,
+                0f, 1.502f, -0.010f,
         };
         b.tube(collar,
                 new float[]{0.068f, 0.074f, 0.084f},
@@ -921,12 +897,15 @@ public final class CharacterMesh {
 
         b.skin(new SkinBinders.Segment(Skeleton.NECK, Skeleton.HEAD,
                 0f, neckY, 0f, 0f, headY, 0f, 0.05f, 0.60f));
-        b.mat(Materials.SKIN).occlusion(1f).uv(UV_SKIN);
+        // One material over the whole head, with the face painted into it, so there
+        // is no seam anywhere on it and nothing to line up.
+        b.mat(Materials.FACE).occlusion(1f).uv(1f);
         buildHead(0f, centreY, centreZ);
 
         b.skin(new SkinBinders.Rigid(Skeleton.HEAD));
-        buildFace(0f, centreY, centreZ);
+        buildEyes(0f, centreY, centreZ);
         b.skin(null);
+        b.uv(UV_SKIN);
     }
 
     private void buildHead(float cx, float cy, float cz) {
@@ -943,10 +922,11 @@ public final class CharacterMesh {
                 float nz = (float) Math.sin(theta) * ring;
                 headPoint(nx, ny, nz, point);
                 headNormal(nx, ny, nz, normal);
+                float u = faceU((float) ((Math.PI * 0.5 - theta) / (Math.PI * 2)));
+                float vCoord = faceV((float) i / HEAD_RINGS);
                 grid[i][j] = b.vertex(
                         cx + point[0], cy + point[1], cz + point[2],
-                        normal[0], normal[1], normal[2],
-                        (float) (theta * HEAD_WIDTH), (float) (phi * HEAD_HEIGHT));
+                        normal[0], normal[1], normal[2], u, vCoord);
             }
         }
         for (int i = 0; i < HEAD_RINGS; i++) {
@@ -985,114 +965,99 @@ public final class CharacterMesh {
     }
 
     /**
-     * Eyes, brows, nostrils and lip colour.
+     * Horizontal face coordinate, from the bearing round the skull.
      *
-     * <p>The nose and the lips are gone from here: they are part of the head's own
-     * surface now, shaped by {@link #headRadius}. What is left is the handful of
-     * things that are a different <em>colour</em> from skin, plus the eyeballs, which
-     * genuinely are separate objects sitting in sockets.
+     * <p>A plain equirectangular wrap spends the whole texture on the whole head, and
+     * the face is only about 30% of that — which leaves a 256-pixel map with roughly
+     * 77 pixels across a face. At that resolution the 15 mm gap between two eyebrows
+     * is seven texels wide, and magnified onto a head filling the screen the two of
+     * them blur into one bar. So the face gets 80% of the map and the rest of the
+     * skull, which is plain skin and hair, is compressed into the border. Beyond the
+     * cheeks the mapping stays monotone all the way to the seam at the back, so
+     * nothing from the face ever wraps round onto it.
      *
-     * <p>Everything hangs off one rule of thumb: the eye line sits halfway from chin
-     * to crown, and the nose and mouth divide the half below it into thirds. Put the
-     * features any higher and a long blank jaw is left underneath, which reads as a
-     * face tipped back even when the head is level.
+     * @param bearing (pi/2 - theta) / 2pi: 0 at the nose, +-0.25 at the ears, +-0.5 behind
      */
-    private void buildFace(float cx, float cy, float cz) {
-        for (int side = -1; side <= 1; side += 2) {
-            // Eyeball, sitting in the socket with the cornea just proud of the lids.
-            float[] eye = onFace(cx, cy, cz, side * 0.42f, 0.02f, 0.90f, -0.0086f);
-            b.mat(Materials.CERAMIC).occlusion(0.72f).tint(0.93f, 0.93f, 0.91f).uv(4f);
-            b.push();
-            b.translate(eye[0], eye[1], eye[2]);
-            b.sphere(0.0128f, 9, 6);
-            b.pop();
+    private static float faceU(float bearing) {
+        float a = Math.abs(bearing);
+        float mapped = a <= 0.17f ? a * 2.3529f : 0.40f + (a - 0.17f) * 0.30303f;
+        return 0.5f + Math.signum(bearing) * mapped;
+    }
 
-            // Iris and pupil sit where the eye is looking, which is forward. Putting
-            // them on the socket's outward normal instead makes the character
-            // wall-eyed, with each iris drifting to the outside of its own ball.
-            final float gazeX = side * 0.07f, gazeY = 0.02f, gazeZ = 1f;
-            float gazeLength = (float) Math.sqrt(gazeX * gazeX + gazeY * gazeY + gazeZ * gazeZ);
-            float gx = gazeX / gazeLength, gy = gazeY / gazeLength, gz = gazeZ / gazeLength;
+    /**
+     * Vertical face coordinate, from the polar angle.
+     *
+     * <p>Stretched about the middle of the face and clamped past the hairline and the
+     * jaw: above and below those the head is plain skin, so it costs nothing to let
+     * the whole crown sample one row of it.
+     */
+    private static float faceV(float polar) {
+        float mapped = 0.5f + (polar - 0.615f) * 1.60f;
+        return mapped < 0.01f ? 0.01f : (mapped > 0.99f ? 0.99f : mapped);
+    }
 
-            b.mat(Materials.PLASTIC).occlusion(0.84f).tint(0.26f, 0.40f, 0.48f).uv(6f);
-            b.push();
-            b.translate(eye[0] + gx * 0.0118f, eye[1] + gy * 0.0118f, eye[2] + gz * 0.0118f);
-            b.scale(1f, 1f, 0.40f);
-            b.sphere(0.0091f, 9, 5);
-            b.pop();
-            b.mat(Materials.PLASTIC).tint(0.05f, 0.05f, 0.06f);
-            b.push();
-            b.translate(eye[0] + gx * 0.0132f, eye[1] + gy * 0.0132f, eye[2] + gz * 0.0132f);
-            b.scale(1f, 1f, 0.34f);
-            b.sphere(0.0034f, 6, 3);
-            b.pop();
+    /** Where the centre of an eye sits, as a direction on the unit head. */
+    /**
+     * Where the centre of an eye sits, as a direction on the unit head.
+     *
+     * <p>Across the face, {@code dx = sin(2*pi*du)} and {@code x = dx*r*HEAD_WIDTH},
+     * which is the conversion every landmark here and in the face map is derived
+     * from: 31.5 mm out from the centreline is a 63 mm interpupillary distance.
+     */
+    private static final float EYE_OUT = 0.399f, EYE_UP = 0.02f, EYE_FWD = 0.92f;
 
-            // Lids. They have to clear the iris or the eye becomes a slit: the upper
-            // one rests on the top of the iris, the lower one below it.
-            b.mat(Materials.SKIN).occlusion(0.86f).noTint().uv(UV_SKIN);
-            float[] upper = onFace(cx, cy, cz, side * 0.41f, 0.115f, 0.88f, -0.004f);
-            b.push();
-            b.translate(upper[0], upper[1], upper[2]);
-            b.rotateY(side * -0.28f);
-            b.rotateX(0.40f);
-            b.scale(1.55f, 0.30f, 0.90f);
-            b.ellipsoid(0.0150f, 0.0150f, 0.0150f, 8, 4);
-            b.pop();
-            float[] lower = onFace(cx, cy, cz, side * 0.41f, -0.078f, 0.89f, -0.005f);
-            b.push();
-            b.translate(lower[0], lower[1], lower[2]);
-            b.rotateY(side * -0.28f);
-            b.rotateX(-0.30f);
-            b.scale(1.40f, 0.24f, 0.86f);
-            b.ellipsoid(0.0145f, 0.0145f, 0.0145f, 8, 4);
-            b.pop();
+    /**
+     * The eyes: one almond-shaped patch each, carrying the eye layer.
+     *
+     * <p>The patch's outline <em>is</em> the eye's outline, which is why it is a
+     * shape and not a rectangle — nothing here is alpha-blended, so a square decal
+     * would show as a square. The previous attempt was a ball set into a socket with
+     * two skin-coloured lids laid over it; between them the lids swallowed the ball
+     * and what was left read as a bead.
+     *
+     * <p>Every vertex is projected back onto the head, so the patch curves with the
+     * face instead of being a flat lid sunk into it at the corners.
+     */
+    private void buildEyes(float cx, float cy, float cz) {
+        b.mat(Materials.EYE).occlusion(0.90f).noTint().uv(1f);
+        final int segments = 16;
+        final float halfWide = 0.212f, halfTall = 0.118f;
 
-            // Brow: a strip of hair lying along the ridge, tilted the way a brow is.
-            float[] brow = onFace(cx, cy, cz, side * 0.40f, 0.225f, 0.86f, 0.001f);
-            b.mat(Materials.HAIR).occlusion(0.74f).noTint().uv(UV_HAIR);
-            b.push();
-            b.translate(brow[0], brow[1], brow[2]);
-            b.rotateY(side * -0.30f);
-            b.rotateZ(side * -0.10f);
-            b.rotateX(-0.30f);
-            b.scale(2.30f, 0.42f, 0.40f);
-            b.ellipsoid(0.0135f, 0.0135f, 0.0135f, 7, 3);
-            b.pop();
+        for (int s = -1; s <= 1; s += 2) {
+            float dx = s * EYE_OUT, dy = EYE_UP, dz = EYE_FWD;
+            float length = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
+            dx /= length; dy /= length; dz /= length;
 
-            // Nostril, dark and set into the underside of the nose.
-            float[] nostril = onFace(cx, cy, cz, side * 0.15f, -0.56f, 0.84f, -0.004f);
-            b.mat(Materials.SKIN).occlusion(0.62f).tint(0.42f, 0.28f, 0.24f).uv(UV_SKIN);
-            b.push();
-            b.translate(nostril[0], nostril[1], nostril[2]);
-            b.scale(0.72f, 0.50f, 0.70f);
-            b.ellipsoid(0.0072f, 0.0072f, 0.0072f, 5, 3);
-            b.pop();
+            // Tangent frame on the unit sphere at the eye's direction.
+            float rx = dz, rz = -dx;
+            float rl = (float) Math.sqrt(rx * rx + rz * rz);
+            rx /= rl; rz /= rl;
+            float ux = dy * rz, uy = dz * rx - dx * rz, uz = -dy * rx;
+            float ul = (float) Math.sqrt(ux * ux + uy * uy + uz * uz);
+            ux /= ul; uy /= ul; uz /= ul;
+
+            float[] centre = onFace(cx, cy, cz, dx, dy, dz, 0.0015f);
+            int hub = b.vertex(centre[0], centre[1], centre[2],
+                    centre[3], centre[4], centre[5], 0.5f, 0.5f);
+
+            int first = -1, previous = -1;
+            for (int i = 0; i <= segments; i++) {
+                double angle = Math.PI * 2 * i / segments;
+                float ca = (float) Math.cos(angle), sa = (float) Math.sin(angle);
+                // Pinched at the corners, so it is an almond rather than an ellipse.
+                float shape = sa * (0.55f + 0.45f * Math.abs(sa));
+                float ox = ca * halfWide, oy = shape * halfTall;
+                float px = dx + rx * ox * s + ux * oy;
+                float py = dy + uy * oy;
+                float pz = dz + rz * ox * s + uz * oy;
+                float[] edge = onFace(cx, cy, cz, px, py, pz, 0.0015f);
+                int v = b.vertex(edge[0], edge[1], edge[2], edge[3], edge[4], edge[5],
+                        0.5f + 0.5f * ca * s, 0.5f - 0.5f * shape);
+                if (previous >= 0) b.triangleOriented(hub, previous, v);
+                if (first < 0) first = v;
+                previous = v;
+            }
         }
-
-        // Lip colour, laid on the swell the head's own surface already makes there,
-        // with a darker seam between the two.
-        float[] mouth = onFace(cx, cy, cz, 0f, -0.68f, 0.82f, -0.001f);
-        b.push();
-        b.translate(mouth[0], mouth[1], mouth[2]);
-        b.rotateX(-0.14f);
-        b.mat(Materials.SKIN).occlusion(0.86f).tint(0.88f, 0.64f, 0.58f).uv(UV_SKIN);
-        b.push();
-        b.translate(0f, 0.0052f, 0.0004f);
-        b.scale(2.50f, 0.32f, 0.26f);
-        b.ellipsoid(0.0122f, 0.0122f, 0.0122f, 8, 4);
-        b.pop();
-        b.push();
-        b.translate(0f, -0.0050f, 0.0008f);
-        b.scale(2.30f, 0.38f, 0.30f);
-        b.ellipsoid(0.0122f, 0.0122f, 0.0122f, 8, 4);
-        b.pop();
-        b.mat(Materials.SKIN).tint(0.46f, 0.29f, 0.27f);
-        b.push();
-        b.translate(0f, 0.0001f, 0.0016f);
-        b.scale(2.42f, 0.070f, 0.16f);
-        b.ellipsoid(0.0122f, 0.0122f, 0.0122f, 8, 3);
-        b.pop();
-        b.pop();
         b.noTint();
     }
 
