@@ -507,13 +507,41 @@ public final class GeometryBuilder {
      * cross-section does not spin as the path bends.
      */
     public GeometryBuilder tube(float[] path, float[] radii, int segments, boolean capEnds) {
+        return tube(path, radii, radii, segments, capEnds);
+    }
+
+    /**
+     * Sweeps an <em>elliptical</em> cross-section along a path.
+     *
+     * <p>Limbs are not round: a forearm is wider across than it is deep, and the
+     * shoulders are much wider than they are thick. Sweeping a circle and then
+     * squashing the result with a non-uniform scale would skew the normals, because
+     * a normal has to be transformed by the inverse transpose, not the matrix. Here
+     * the ellipse normal is derived analytically instead.
+     *
+     * @param radiiN half-extent along the frame's normal axis at each path point
+     * @param radiiB half-extent along the frame's binormal axis at each path point
+     */
+    public GeometryBuilder tube(float[] path, float[] radiiN, float[] radiiB,
+                                int segments, boolean capEnds) {
         int points = path.length / 3;
-        if (points < 2 || radii.length < points) return this;
+        if (points < 2 || radiiN.length < points || radiiB.length < points) return this;
         int seg = Math.max(3, segments);
 
         float upX = 0f, upY = 1f, upZ = 0f;
         int[][] grid = new int[points][seg + 1];
         float[] prevNormal = null;
+
+        // Run the UV's v axis along the path in metres. Numbering the rings instead
+        // would stretch a weave differently on a forearm than on a thigh, because the
+        // two are swept from the same number of points over different lengths.
+        float[] along = new float[points];
+        for (int p = 1; p < points; p++) {
+            float sx = path[p * 3] - path[(p - 1) * 3];
+            float sy = path[p * 3 + 1] - path[(p - 1) * 3 + 1];
+            float sz = path[p * 3 + 2] - path[(p - 1) * 3 + 2];
+            along[p] = along[p - 1] + (float) Math.sqrt(sx * sx + sy * sy + sz * sz);
+        }
 
         for (int p = 0; p < points; p++) {
             int a = Math.max(0, p - 1), b = Math.min(points - 1, p + 1);
@@ -544,15 +572,22 @@ public final class GeometryBuilder {
             float bz = tx * ny - ty * nx;
 
             float cx = path[p * 3], cy = path[p * 3 + 1], cz = path[p * 3 + 2];
-            float radius = radii[p];
+            float rn = radiiN[p], rb = radiiB[p];
             for (int j = 0; j <= seg; j++) {
                 double theta = Math.PI * 2 * j / seg;
                 float ct = (float) Math.cos(theta), st = (float) Math.sin(theta);
-                float dirX = nx * ct + bx * st;
-                float dirY = ny * ct + by * st;
-                float dirZ = nz * ct + bz * st;
-                grid[p][j] = vertex(cx + dirX * radius, cy + dirY * radius, cz + dirZ * radius,
-                        dirX, dirY, dirZ, (float) (theta * radius), p * 0.25f);
+                // Point on the ellipse, and the ellipse's own outward normal, which
+                // points along (cos/rn, sin/rb) rather than back at the centre.
+                float en = ct / rn, eb = st / rb;
+                float el = (float) Math.sqrt(en * en + eb * eb);
+                if (el < 1e-6f) el = 1f;
+                en /= el; eb /= el;
+                grid[p][j] = vertex(
+                        cx + nx * ct * rn + bx * st * rb,
+                        cy + ny * ct * rn + by * st * rb,
+                        cz + nz * ct * rn + bz * st * rb,
+                        nx * en + bx * eb, ny * en + by * eb, nz * en + bz * eb,
+                        (float) (theta * (rn + rb) * 0.5f), along[p]);
             }
         }
         for (int p = 0; p < points - 1; p++) {
@@ -562,8 +597,8 @@ public final class GeometryBuilder {
         }
         if (capEnds) {
             int last = points - 1;
-            capEnd(path, radii, 0, -1, seg);
-            capEnd(path, radii, last, 1, seg);
+            capEnd(path, radiiN, radiiB, 0, -1, seg);
+            capEnd(path, radiiN, radiiB, last, 1, seg);
         }
         return this;
     }
@@ -576,7 +611,8 @@ public final class GeometryBuilder {
      * as though it were still curved and leaves the winding test with nothing
      * meaningful to compare against.
      */
-    private void capEnd(float[] path, float[] radii, int point, int direction, int seg) {
+    private void capEnd(float[] path, float[] radiiN, float[] radiiB,
+                        int point, int direction, int seg) {
         int points = path.length / 3;
         int other = direction < 0 ? Math.min(points - 1, point + 1) : Math.max(0, point - 1);
         float ax = path[point * 3] - path[other * 3];
@@ -587,7 +623,7 @@ public final class GeometryBuilder {
         else { ax /= len; ay /= len; az /= len; }
 
         float cx = path[point * 3], cy = path[point * 3 + 1], cz = path[point * 3 + 2];
-        float radius = radii[point];
+        float rn = radiiN[point], rb = radiiB[point];
 
         // Basis perpendicular to the axis, matching the side ring's start angle.
         float ux, uy, uz;
@@ -607,11 +643,11 @@ public final class GeometryBuilder {
         for (int j = 0; j <= seg; j++) {
             double theta = Math.PI * 2 * j / seg;
             float ct = (float) Math.cos(theta), st = (float) Math.sin(theta);
-            float dx = ux * ct + bx * st;
-            float dy = uy * ct + by * st;
-            float dz = uz * ct + bz * st;
-            int v = vertex(cx + dx * radius, cy + dy * radius, cz + dz * radius,
-                    ax, ay, az, ct * radius, st * radius);
+            float dx = ux * ct * rn + bx * st * rb;
+            float dy = uy * ct * rn + by * st * rb;
+            float dz = uz * ct * rn + bz * st * rb;
+            int v = vertex(cx + dx, cy + dy, cz + dz,
+                    ax, ay, az, ct * rn, st * rb);
             if (prev >= 0) triangleOriented(centre, prev, v);
             if (first < 0) first = v;
             prev = v;

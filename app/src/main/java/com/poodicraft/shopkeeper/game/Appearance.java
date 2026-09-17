@@ -36,7 +36,7 @@ public final class Appearance {
     public int shirt = SHIRT_COLOURS[0];
     public int trousers = TROUSER_COLOURS[0];
     public int shoes = SHOE_COLOURS[0];
-    public int apron = 0xE8E4DA;
+    public int apron = 0x9C7A52;
     /** 0 short, 1 long, 2 cropped. */
     public int hairStyle = 0;
     /** Staff wear an apron; shoppers do not. */
@@ -66,7 +66,7 @@ public final class Appearance {
         // A uniform makes staff readable at a glance across a busy shop.
         a.shirt = 0x2E7D63;
         a.trousers = 0x2B303B;
-        a.apron = 0xF0ECE2;
+        a.apron = 0xA8845A;
         a.wearsApron = true;
         a.height = 0.96f + rng.nextFloat() * 0.10f;
         a.tintsDirty = true;

@@ -58,31 +58,34 @@ public final class Skeleton {
     /**
      * Bind-pose head position of each bone, in model space.
      *
-     * <p>Laid out against adult proportions for a 1.78 m figure: hip joint at 53% of
-     * height, knee at 28%, shoulder at 82%, chin at 86%, crown at the top. Getting
-     * these wrong is what makes a character read as a mannequin however good the
-     * mesh over them is.
+     * <p>Measured against a 1.78 m adult rather than eyeballed. The numbers that
+     * matter most for whether the figure reads as a person are the ones that set the
+     * silhouette: the shoulder joint sits at 79% of height and 0.178 m out, the
+     * fingertips reach mid-thigh (which puts the wrist at 0.845 m, not the 0.93 m a
+     * guess lands on), the hip joint is at 52%, and the knee at 28%. An arm even
+     * five centimetres short makes an adult look like a doll no matter how good the
+     * mesh stretched over it is.
      */
     public static final float[][] BIND = {
-            {0.000f, 0.960f, 0.000f},   // HIPS
-            {0.000f, 1.110f, 0.008f},   // SPINE
-            {0.000f, 1.290f, 0.000f},   // CHEST
-            {0.000f, 1.500f, -0.012f},  // NECK
-            {0.000f, 1.585f, 0.000f},   // HEAD  (base of the skull, not its centre)
-            {0.058f, 1.462f, 0.000f},   // SHOULDER_L
-            {0.188f, 1.448f, 0.000f},   // UPPERARM_L
-            {0.200f, 1.180f, 0.006f},   // FOREARM_L
-            {0.210f, 0.930f, 0.010f},   // HAND_L
-            {-0.058f, 1.462f, 0.000f},  // SHOULDER_R
-            {-0.188f, 1.448f, 0.000f},  // UPPERARM_R
-            {-0.200f, 1.180f, 0.006f},  // FOREARM_R
-            {-0.210f, 0.930f, 0.010f},  // HAND_R
-            {0.098f, 0.935f, 0.000f},   // THIGH_L
-            {0.102f, 0.505f, 0.006f},   // SHIN_L
-            {0.104f, 0.075f, 0.000f},   // FOOT_L
-            {-0.098f, 0.935f, 0.000f},  // THIGH_R
-            {-0.102f, 0.505f, 0.006f},  // SHIN_R
-            {-0.104f, 0.075f, 0.000f},  // FOOT_R
+            {0.000f, 0.945f, 0.000f},   // HIPS
+            {0.000f, 1.108f, 0.010f},   // SPINE
+            {0.000f, 1.300f, 0.000f},   // CHEST
+            {0.000f, 1.452f, -0.016f},  // NECK
+            {0.000f, 1.605f, 0.004f},   // HEAD  (pivots at the ear, not at the chin)
+            {0.052f, 1.420f, -0.006f},  // SHOULDER_L
+            {0.178f, 1.408f, -0.002f},  // UPPERARM_L
+            {0.190f, 1.100f, 0.006f},   // FOREARM_L
+            {0.198f, 0.845f, 0.014f},   // HAND_L
+            {-0.052f, 1.420f, -0.006f}, // SHOULDER_R
+            {-0.178f, 1.408f, -0.002f}, // UPPERARM_R
+            {-0.190f, 1.100f, 0.006f},  // FOREARM_R
+            {-0.198f, 0.845f, 0.014f},  // HAND_R
+            {0.091f, 0.925f, 0.000f},   // THIGH_L
+            {0.100f, 0.497f, 0.008f},   // SHIN_L
+            {0.105f, 0.072f, -0.012f},  // FOOT_L
+            {-0.091f, 0.925f, 0.000f},  // THIGH_R
+            {-0.100f, 0.497f, 0.008f},  // SHIN_R
+            {-0.105f, 0.072f, -0.012f}, // FOOT_R
     };
 
     /** Animated local rotation of each bone, relative to its bind orientation. */

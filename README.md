@@ -193,17 +193,25 @@ are generated as pixels at startup, each with a matching normal map derived from
 its own height field. A material is a *vertex attribute* indexing into that array,
 so the entire shop, mixing every surface it has, still draws in one call.
 
-**One mesh, many people.** Everyone in the shop shares a single 4,900-triangle
+**One mesh, many people.** Everyone in the shop shares a single 5,000-triangle
 skinned body. They differ by bone matrices, height, and a per-draw colour table
 keyed on material — skin, hair, shirt, trousers and shoes are separate materials,
 so one table turns the same geometry into a different person.
 
 **The characters can be looked at offline.** `tools/preview` rasterises the same
 meshes, the same skinning matrices and the same albedo textures to PNGs on a plain
-JVM. Building a character by reasoning alone produced eyes and a nose buried inside
-the skull, an apron hanging off the chest as two flat slabs, and fabric textures at
-one repeat per metre that rendered as masonry. None of that shows up in a test that
-checks winding and bone weights; all of it is obvious in a picture.
+JVM — seven camera angles plus a flat-fill silhouette, laid out as one contact
+sheet. Building a character by reasoning alone produced eyes and a nose buried
+inside the skull, an apron hanging off the chest as two flat slabs, and fabric
+textures at one repeat per metre that rendered as masonry. Looking at the pictures
+then found a second layer underneath: a torso lofted to collar height so there was
+nowhere for a neck to go, limbs swept as straight cones with no knee or elbow, a
+spine with no S so the body was a plank in profile, a head whose lowest point was
+under the ear rather than at the chin — which tips the whole face back — and a skull
+carrying the *sphere's* normals, so every feature modelled into it, the nose
+included, was geometrically present and invisible on screen. None of that shows up
+in a test that checks winding and bone weights. All of it is obvious in a picture,
+and the ones that can be measured afterwards are now in `CharacterTest`.
 
 **Animation is written, not authored.** There are no animation files. Poses are
 built from curves — a walk cycle, a carry, a crouch, an arm reaching for a specific

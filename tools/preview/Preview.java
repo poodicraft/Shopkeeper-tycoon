@@ -24,13 +24,20 @@ import java.util.ArrayList;
  */
 public final class Preview {
 
-    private static final int WIDTH = 460;
-    private static final int HEIGHT = 700;
+    /** Output size. Rasterising at SS times this and boxing down hides the jaggies
+     *  that otherwise read as broken geometry when they are not. */
+    private static final int OUT_WIDTH = 430;
+    private static final int OUT_HEIGHT = 660;
+    private static final int SS = 2;
+    private static final int WIDTH = OUT_WIDTH * SS;
+    private static final int HEIGHT = OUT_HEIGHT * SS;
 
     private final float[] depth = new float[WIDTH * HEIGHT];
     private final int[] pixels = new int[WIDTH * HEIGHT];
     private final TextureFactory textures = new TextureFactory();
     MeshData apron;
+    /** Flat-fill mode: the silhouette is the fastest test of whether a figure reads. */
+    private boolean silhouette = false;
 
     public static void main(String[] args) throws Exception {
         String outDir = args.length > 0 ? args[0] : "build/preview";
@@ -53,25 +60,44 @@ public final class Preview {
         shopkeeper.shoes = 0x3A3230;
         shopkeeper.markDirty();
 
-        // Front, three-quarter and side, plus a close-up of the head and a walk pose.
         preview.apron = apron;
-        preview.render(body, hair[0], shopkeeper, "idle", 0f, 0f, 1.6f, 0.90f, 3.2f);
-        preview.save(outDir + "/character-front.png");
 
-        preview.render(body, hair[0], shopkeeper, "idle", 2.4f, 0f, 1.6f, 0.90f, 3.2f);
-        preview.save(outDir + "/character-back.png");
+        // Every angle a reviewer would ask for, plus the silhouette, which shows
+        // proportion errors that shading hides.
+        java.util.List<String> sheet = new ArrayList<>();
+        String[][] views = {
+                {"front",         "idle",  "0.00", "0.90", "3.20", "1.60"},
+                {"three-quarter", "idle",  "0.85", "0.90", "3.20", "1.60"},
+                {"side",          "idle",  "1.57", "0.90", "3.20", "1.60"},
+                {"back",          "idle",  "3.14", "0.90", "3.20", "1.60"},
+                {"walk",          "walk",  "1.20", "0.90", "3.20", "1.60"},
+                {"carry",         "carry", "1.20", "0.90", "3.20", "1.60"},
+        };
+        for (String[] v : views) {
+            preview.silhouette = false;
+            preview.render(body, hair[0], shopkeeper, v[1], Float.parseFloat(v[2]), 0f,
+                    Float.parseFloat(v[5]), Float.parseFloat(v[3]), Float.parseFloat(v[4]));
+            String path = outDir + "/character-" + v[0] + ".png";
+            preview.save(path);
+            sheet.add(path);
+        }
 
-        preview.render(body, hair[0], shopkeeper, "idle", 1.1f, 0f, 1.6f, 0.90f, 3.2f);
-        preview.save(outDir + "/character-three-quarter.png");
-
-        preview.render(body, hair[0], shopkeeper, "idle", 0.25f, -0.10f, 1.6f, 1.60f, 0.70f);
+        preview.silhouette = false;
+        preview.render(body, hair[0], shopkeeper, "idle", 0.25f, -0.06f, 2.70f, 1.62f, 0.62f);
         preview.save(outDir + "/character-head.png");
+        sheet.add(outDir + "/character-head.png");
 
-        preview.render(body, hair[0], shopkeeper, "walk", 1.2f, 0f, 1.6f, 0.90f, 3.2f);
-        preview.save(outDir + "/character-walk.png");
+        preview.render(body, hair[0], shopkeeper, "idle", 1.57f, -0.06f, 2.70f, 1.62f, 0.62f);
+        preview.save(outDir + "/character-head-side.png");
+        sheet.add(outDir + "/character-head-side.png");
 
-        preview.render(body, hair[0], shopkeeper, "carry", 1.2f, 0f, 1.6f, 0.90f, 3.2f);
-        preview.save(outDir + "/character-carry.png");
+        preview.silhouette = true;
+        preview.render(body, hair[0], shopkeeper, "idle", 0f, 0f, 1.60f, 0.90f, 3.20f);
+        preview.save(outDir + "/character-silhouette.png");
+        sheet.add(outDir + "/character-silhouette.png");
+        preview.silhouette = false;
+
+        writeSheet(sheet, outDir + "/sheet.png");
 
         System.out.println("wrote previews to " + outDir);
     }
@@ -79,8 +105,9 @@ public final class Preview {
     private void render(MeshData body, MeshData hair, Appearance look, String pose,
                         float orbit, float tilt, float distanceScale,
                         float lookAtY, float frameHeight) {
+        int background = silhouette ? 0xFFF0F2F5 : 0xFF20242A;
         for (int i = 0; i < pixels.length; i++) {
-            pixels[i] = 0xFF20242A;
+            pixels[i] = background;
             depth[i] = Float.MAX_VALUE;
         }
 
@@ -237,6 +264,10 @@ public final class Preview {
                 float fill = 0.30f + 0.22f * (n1 * 0.5f + 0.5f);
                 float light = 0.15f + key * 0.95f + fill;
 
+                if (silhouette) {
+                    pixels[index] = 0xFF1B1F26;
+                    continue;
+                }
                 pixels[index] = 0xFF000000
                         | (clamp(tr * light) << 16)
                         | (clamp(tg * light) << 8)
@@ -264,9 +295,46 @@ public final class Preview {
     }
 
     private void save(String path) throws Exception {
-        BufferedImage image = new BufferedImage(WIDTH, HEIGHT, BufferedImage.TYPE_INT_RGB);
-        image.setRGB(0, 0, WIDTH, HEIGHT, pixels, 0, WIDTH);
+        BufferedImage image = new BufferedImage(OUT_WIDTH, OUT_HEIGHT, BufferedImage.TYPE_INT_RGB);
+        for (int y = 0; y < OUT_HEIGHT; y++) {
+            for (int x = 0; x < OUT_WIDTH; x++) {
+                int r = 0, g = 0, bl = 0;
+                for (int sy = 0; sy < SS; sy++) {
+                    for (int sx = 0; sx < SS; sx++) {
+                        int p = pixels[(y * SS + sy) * WIDTH + x * SS + sx];
+                        r += (p >> 16) & 0xFF;
+                        g += (p >> 8) & 0xFF;
+                        bl += p & 0xFF;
+                    }
+                }
+                int n = SS * SS;
+                image.setRGB(x, y, ((r / n) << 16) | ((g / n) << 8) | (bl / n));
+            }
+        }
         ImageIO.write(image, "png", new File(path));
         System.out.println("  " + path);
+    }
+
+    /** Lays the views out in a grid so one image shows the whole character. */
+    private static void writeSheet(java.util.List<String> paths, String out) throws Exception {
+        int columns = 4;
+        int rows = (paths.size() + columns - 1) / columns;
+        int gap = 8;
+        BufferedImage sheet = new BufferedImage(
+                columns * OUT_WIDTH + (columns + 1) * gap,
+                rows * OUT_HEIGHT + (rows + 1) * gap,
+                BufferedImage.TYPE_INT_RGB);
+        java.awt.Graphics2D g = sheet.createGraphics();
+        g.setColor(new java.awt.Color(0x10, 0x12, 0x16));
+        g.fillRect(0, 0, sheet.getWidth(), sheet.getHeight());
+        for (int i = 0; i < paths.size(); i++) {
+            BufferedImage tile = ImageIO.read(new File(paths.get(i)));
+            int cx = gap + (i % columns) * (OUT_WIDTH + gap);
+            int cy = gap + (i / columns) * (OUT_HEIGHT + gap);
+            g.drawImage(tile, cx, cy, null);
+        }
+        g.dispose();
+        ImageIO.write(sheet, "png", new File(out));
+        System.out.println("  " + out);
     }
 }

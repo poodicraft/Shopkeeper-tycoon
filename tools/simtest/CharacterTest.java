@@ -21,6 +21,7 @@ public final class CharacterTest {
     public static void main(String[] args) {
         MeshData body = new CharacterMesh().buildBody();
 
+        testSilhouette(body);
         testBindPose(body);
         testHierarchy();
         testPosesStayHuman(body);
@@ -33,6 +34,94 @@ public final class CharacterTest {
             System.out.println(failures + " of " + checks + " character checks FAILED.");
             System.exit(1);
         }
+    }
+
+    /**
+     * Checks the things that decide whether the figure reads as a person.
+     *
+     * <p>These are all failures that no amount of assertion about winding, weights or
+     * bounds would ever catch: a body can be watertight, correctly skinned and
+     * exactly 1.78 m tall and still be a slab with its face pointing at the ceiling.
+     * Each of these was a real bug, found by rendering the mesh and looking at it.
+     */
+    private static void testSilhouette(MeshData body) {
+        section("Silhouette");
+
+        // The shoulders have to be wider than the waist. When the ribcage is widened
+        // to reach shoulder width instead of the deltoids doing it, the outline stops
+        // changing between the armpit and the hip, and the eye reads that as furniture.
+        // Measured across the back of the body only. Nothing else reaches past
+        // z = -0.075: measure the widest point at any height instead and the answer
+        // at the waist is the width of the forearms, not of the waist.
+        float chest = torsoWidth(body, 1.30f, 1.36f);
+        float waist = torsoWidth(body, 1.05f, 1.12f);
+        check(String.format("the torso tapers from chest to waist (%.2f m vs %.2f m)",
+                chest, waist), chest > waist * 1.15f);
+        float shoulders = widthBetween(body, 1.28f, 1.40f);
+        check(String.format("the shoulders are an adult's, not a coat hanger's (%.2f m)",
+                shoulders), shoulders > 0.42f && shoulders < 0.52f);
+
+        // The chin must be the lowest point of the head. Parameterise a head as an
+        // ellipsoid and the lowest point lands under the ear instead, which tips the
+        // whole face back however level the head bone is.
+        float lowestY = Float.MAX_VALUE, lowestZ = 0f;
+        for (int v = 0; v < body.vertexCount(); v++) {
+            float y = body.get(v, 1);
+            if (y < 1.50f || Math.abs(body.get(v, 0)) > 0.05f) continue;
+            if (y < lowestY) { lowestY = y; lowestZ = body.get(v, 2); }
+        }
+        check(String.format("the chin is the lowest part of the head, and forward (z = %.3f m)",
+                lowestZ), lowestZ > 0.015f);
+
+        // Fingertips reach mid-thigh. Short arms are what make an adult read as a doll.
+        float fingertips = Float.MAX_VALUE;
+        for (int v = 0; v < body.vertexCount(); v++) {
+            // Outboard of the widest trouser and above the shoes, only hands remain.
+            if (Math.abs(body.get(v, 0)) < 0.175f || body.get(v, 1) < 0.30f) continue;
+            fingertips = Math.min(fingertips, body.get(v, 1));
+        }
+        check(String.format("the fingertips reach mid-thigh (%.2f m)", fingertips),
+                fingertips > 0.60f && fingertips < 0.72f);
+
+        // The head is shaded by its own surface, not by the sphere underneath it. Get
+        // this wrong and the nose is present in the geometry and invisible on screen.
+        float steepest = 0f;
+        for (int v = 0; v < body.vertexCount(); v++) {
+            float x = body.get(v, 0), y = body.get(v, 1), z = body.get(v, 2);
+            if (y < 1.57f || y > 1.66f || z < 0.07f || Math.abs(x) > 0.03f) continue;
+            if (body.get(v, 5) < 0.2f) continue;   // front-facing surface only
+            // Direction out from the skull's centre, which is what a sphere's normal
+            // would be, against the normal the mesh actually carries.
+            float rx = x, ry = y - 1.657f, rz = z - 0.004f;
+            float rl = (float) Math.sqrt(rx * rx + ry * ry + rz * rz);
+            if (rl < 1e-4f) continue;
+            float dot = (rx * body.get(v, 3) + ry * body.get(v, 4) + rz * body.get(v, 5)) / rl;
+            steepest = Math.max(steepest,
+                    (float) Math.toDegrees(Math.acos(Math.max(-1f, Math.min(1f, dot)))));
+        }
+        check(String.format("the nose is shaded as a nose, not as a sphere (%.0f deg off radial)",
+                steepest), steepest > 20f);
+    }
+
+    /** Widest point across the back of the torso in a height band, arms excluded. */
+    private static float torsoWidth(MeshData body, float low, float high) {
+        float half = 0f;
+        for (int v = 0; v < body.vertexCount(); v++) {
+            float y = body.get(v, 1);
+            if (y < low || y > high || body.get(v, 2) > -0.075f) continue;
+            half = Math.max(half, Math.abs(body.get(v, 0)));
+        }
+        return half * 2f;
+    }
+
+    /** Widest point of the body across a height band, ignoring nothing. */
+    private static float widthBetween(MeshData body, float low, float high) {
+        float half = 0f;
+        for (int v = 0; v < body.vertexCount(); v++) {
+            float y = body.get(v, 1);
+            if (y >= low && y <= high) half = Math.max(half, Math.abs(body.get(v, 0)));
+        }
+        return half * 2f;
     }
 
     /** With no rotations, skinning must be the identity apart from the root transform. */

@@ -78,12 +78,28 @@ public final class Animator {
         if (crouch > 0.001f) applyCrouch(skeleton);
         if (reach > 0.001f) applyReach();
         if (scan > 0.001f) applyScan();
+        levelTheHead();
         applyLook();
 
         for (int i = 0; i < Skeleton.BONE_COUNT; i++) {
             scratch.setEuler(pitch[i], yaw[i], roll[i]);
             skeleton.local[i].set(scratch);
         }
+    }
+
+    /**
+     * Takes most of the spine's lean back out again at the neck.
+     *
+     * <p>People keep their eyes on the horizon: lean forward to pick something up and
+     * the head stays level, it does not rotate with the chest. Let the head simply
+     * inherit whatever the spine is doing and the face points at the ceiling every
+     * time the body bends, which is the single most obvious thing wrong with a rig
+     * that is otherwise fine.
+     */
+    private void levelTheHead() {
+        float lean = pitch[Skeleton.SPINE] + pitch[Skeleton.CHEST];
+        pitch[Skeleton.NECK] -= lean * 0.45f;
+        pitch[Skeleton.HEAD] -= lean * 0.50f;
     }
 
     // ------------------------------------------------------------------ layers
@@ -101,21 +117,34 @@ public final class Animator {
         roll[Skeleton.SHOULDER_L] += breath * 0.020f * rest;
         roll[Skeleton.SHOULDER_R] += -breath * 0.020f * rest;
 
-        // Weight shifts from foot to foot.
-        roll[Skeleton.HIPS] += sway * 0.022f * rest;
-        yaw[Skeleton.CHEST] += drift * 0.030f * rest;
-        skeleton.hipOffsetY += -Math.abs(sway) * 0.006f * rest;
+        // Contrapposto: the weight rests on one leg, so that hip rides up and the
+        // shoulders tilt back the other way to keep the head over the feet. A figure
+        // standing square on both feet with everything level is a shop dummy — it is
+        // the one pose a person almost never actually holds.
+        float stand = 0.34f + sway * 0.66f;
+        roll[Skeleton.HIPS] += stand * 0.052f * rest;
+        roll[Skeleton.CHEST] += -stand * 0.036f * rest;
+        roll[Skeleton.NECK] += stand * 0.020f * rest;
+        yaw[Skeleton.CHEST] += drift * 0.034f * rest;
+        yaw[Skeleton.NECK] += drift * 0.026f * rest;
+        // The loaded leg straightens and the free one softens at the knee.
+        pitch[Skeleton.SHIN_L] += Math.max(0f, -stand) * 0.16f * rest;
+        pitch[Skeleton.SHIN_R] += Math.max(0f, stand) * 0.16f * rest;
+        skeleton.hipOffsetY += -Math.abs(stand) * 0.008f * rest;
 
-        // Arms rest away from the body with a little elbow flex. Hanging them dead
-        // straight against the ribs is most of what makes an idle read as a plank.
-        roll[Skeleton.UPPERARM_L] += (-0.165f + sway * 0.016f) * rest;
-        roll[Skeleton.UPPERARM_R] += (0.165f - sway * 0.016f) * rest;
-        pitch[Skeleton.UPPERARM_L] += -0.06f * rest;
-        pitch[Skeleton.UPPERARM_R] += -0.06f * rest;
-        pitch[Skeleton.FOREARM_L] += -0.26f * rest;
-        pitch[Skeleton.FOREARM_R] += -0.26f * rest;
-        yaw[Skeleton.FOREARM_L] += -0.12f * rest;
-        yaw[Skeleton.FOREARM_R] += 0.12f * rest;
+        // Arms rest with a little elbow flex, which carries the hands forward of the
+        // thighs. Hanging them dead straight is most of what makes an idle read as a
+        // plank — but the inward roll has to stay small: the upper arm is only
+        // 0.178 m out from the centreline, so rolling it in by the 0.165 rad that
+        // looks right on paper drives the elbow straight through the waist.
+        roll[Skeleton.UPPERARM_L] += (-0.040f + sway * 0.014f) * rest;
+        roll[Skeleton.UPPERARM_R] += (0.040f - sway * 0.014f) * rest;
+        pitch[Skeleton.UPPERARM_L] += -0.05f * rest;
+        pitch[Skeleton.UPPERARM_R] += -0.05f * rest;
+        pitch[Skeleton.FOREARM_L] += -0.22f * rest;
+        pitch[Skeleton.FOREARM_R] += -0.22f * rest;
+        yaw[Skeleton.FOREARM_L] += -0.10f * rest;
+        yaw[Skeleton.FOREARM_R] += 0.10f * rest;
     }
 
     private void applyLocomotion(Skeleton skeleton) {
@@ -158,8 +187,10 @@ public final class Animator {
         yaw[Skeleton.CHEST] += -legL * 0.135f * amount;
         roll[Skeleton.HIPS] += -legL * 0.055f * amount;
 
-        // Lean into the run.
-        pitch[Skeleton.SPINE] += -(0.045f + run * 0.13f) * amount;
+        // Lean into the run. The spine points up, so a positive pitch tips it
+        // forward — the opposite sign to a limb that hangs down, and getting it
+        // backwards puts a walker on their heels with their chin in the air.
+        pitch[Skeleton.SPINE] += (0.045f + run * 0.13f) * amount;
 
         // Vertical bob runs at twice the stride frequency.
         float bob = (float) Math.cos(p * 2f);
@@ -191,8 +222,8 @@ public final class Animator {
         yaw[Skeleton.FOREARM_L] += -0.30f * w;
         yaw[Skeleton.FOREARM_R] += 0.30f * w;
         // Leaning back counterbalances the load.
-        pitch[Skeleton.SPINE] += 0.10f * w;
-        pitch[Skeleton.CHEST] += 0.05f * w;
+        pitch[Skeleton.SPINE] += -0.10f * w;
+        pitch[Skeleton.CHEST] += -0.05f * w;
     }
 
     private void applyCrouch(Skeleton skeleton) {
@@ -203,8 +234,8 @@ public final class Animator {
         pitch[Skeleton.SHIN_R] += 1.65f * w;
         pitch[Skeleton.FOOT_L] += -0.62f * w;
         pitch[Skeleton.FOOT_R] += -0.62f * w;
-        pitch[Skeleton.SPINE] += -0.26f * w;
-        pitch[Skeleton.CHEST] += -0.12f * w;
+        pitch[Skeleton.SPINE] += 0.26f * w;
+        pitch[Skeleton.CHEST] += 0.12f * w;
         skeleton.hipOffsetY += -0.36f * w;
     }
 
@@ -226,7 +257,7 @@ public final class Animator {
         float elbow = MathUtil.clamp(-0.85f + delta * 0.9f, -1.5f, -0.15f);
         pitch[fore] = MathUtil.lerp(pitch[fore], elbow, w);
         yaw[Skeleton.CHEST] += -side * 0.22f * w;
-        pitch[Skeleton.CHEST] += -0.10f * w;
+        pitch[Skeleton.CHEST] += 0.10f * w;
     }
 
     private void applyScan() {
